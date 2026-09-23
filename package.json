@@ -1,0 +1,7 @@
+{
+  "name": "theboard",
+  "private": true,
+  "scripts": {
+    "build": "echo no-build"
+  }
+}
