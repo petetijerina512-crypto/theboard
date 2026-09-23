@@ -1,0 +1,9 @@
+[build]
+  command = "exit 0"
+  publish = "."
+  functions = "netlify/functions"
+
+[[redirects]]
+  from = "/api/kalshi"
+  to = "/.netlify/functions/kalshi"
+  status = 200
