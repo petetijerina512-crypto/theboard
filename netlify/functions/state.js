@@ -13,7 +13,11 @@ exports.handler = async (event) => {
 
   try {
     const mod = await import('@netlify/blobs');
-    const store = mod.getStore({ name: 'board-state', consistency: 'strong' });
+   const store = mod.getStore({
+  name: 'board-state',
+  siteID: process.env.NETLIFY_SITE_ID,
+  token: process.env.NETLIFY_AUTH_TOKEN
+});
 
     if (event.httpMethod === 'GET') {
       const raw = await store.get('state', { type: 'json' });
