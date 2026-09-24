@@ -41,9 +41,11 @@ exports.handler = async (event) => {
       Object.keys(incoming.bets || {}).forEach(id => {
         const a = Array.isArray(bets[id]) ? bets[id] : [];
         const b = Array.isArray(incoming.bets[id]) ? incoming.bets[id] : [];
+        if (!b.length && a.length) { bets[id] = a; return; }
         const map = {};
         a.concat(b).forEach(bt => { if (bt && bt.id) map[bt.id] = bt; });
-        bets[id] = Object.keys(map).map(k => map[k]);
+        const merged = Object.keys(map).map(k => map[k]);
+        bets[id] = merged.length >= a.length ? merged : a;
       });
       const next = {
         users,
