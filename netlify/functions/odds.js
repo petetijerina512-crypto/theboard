@@ -28,7 +28,7 @@ exports.handler = async (event) => {
   try {
     if (!force && store) {
       const cached = await store.get('odds', { type: 'json' });
-      if (cached && cached.games && cached.updatedAt && Date.now() - cached.updatedAt < 120000) {
+      if (cached && cached.games && cached.games.length && cached.updatedAt && Date.now() - cached.updatedAt < 120000) {
         return { statusCode: 200, headers, body: JSON.stringify(cached) };
       }
     }
