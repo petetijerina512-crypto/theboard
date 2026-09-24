@@ -1,19 +1,19 @@
 const https = require('https');
 
-const ESPN = {
-  nfl: 'https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard',
-  nba: 'https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard',
-  mlb: 'https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/scoreboard',
-  nhl: 'https://site.api.espn.com/apis/site/v2/sports/hockey/nhl/scoreboard',
-  ncaaf: 'https://site.api.espn.com/apis/site/v2/sports/football/college-football/scoreboard',
-  wnba: 'https://site.api.espn.com/apis/site/v2/sports/basketball/wnba/scoreboard',
-  mma: 'https://site.api.espn.com/apis/site/v2/sports/mma/ufc/scoreboard',
-  epl: 'https://site.api.espn.com/apis/site/v2/sports/soccer/eng.1/scoreboard',
-  laliga: 'https://site.api.espn.com/apis/site/v2/sports/soccer/esp.1/scoreboard',
-  bundesliga: 'https://site.api.espn.com/apis/site/v2/sports/soccer/ger.1/scoreboard',
-  seriea: 'https://site.api.espn.com/apis/site/v2/sports/soccer/ita.1/scoreboard',
-  mls: 'https://site.api.espn.com/apis/site/v2/sports/soccer/usa.1/scoreboard',
-  ucl: 'https://site.api.espn.com/apis/site/v2/sports/soccer/uefa.champions/scoreboard'
+const HEADER = {
+  nfl: 'football/nfl',
+  nba: 'basketball/nba',
+  mlb: 'baseball/mlb',
+  nhl: 'hockey/nhl',
+  ncaaf: 'football/college-football',
+  wnba: 'basketball/wnba',
+  mma: 'mma/ufc',
+  epl: 'soccer/eng.1',
+  laliga: 'soccer/esp.1',
+  bundesliga: 'soccer/ger.1',
+  seriea: 'soccer/ita.1',
+  mls: 'soccer/usa.1',
+  ucl: 'soccer/uefa.champions'
 };
 
 const KALSHI = {
@@ -25,8 +25,14 @@ const KALSHI = {
 };
 
 function getJson(url) {
-  return new Promise((resolve, reject) => {
-    const req = https.get(url, { headers: { 'User-Agent': 'TheBoard/1.0' } }, (res) => {
+  return new Promise((resolve) => {
+    const req = https.get(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        Accept: 'application/json,text/plain,*/*',
+        Referer: 'https://www.espn.com/'
+      }
+    }, (res) => {
       let body = '';
       res.on('data', (c) => (body += c));
       res.on('end', () => {
@@ -39,93 +45,62 @@ function getJson(url) {
   });
 }
 
-function fighterName(c) {
-  if (!c) return '';
-  if (c.athlete) return c.athlete.shortName || c.athlete.displayName || '';
-  if (c.team) return c.team.shortDisplayName || c.team.displayName || '';
-  return c.displayName || c.name || '';
-}
-function fighterAbbr(c) {
-  if (!c) return '';
-  if (c.athlete) {
-    const n = c.athlete.displayName || '';
-    const parts = n.split(' ');
-    return parts.length > 1 ? parts[parts.length - 1] : n;
-  }
-  if (c.team) return c.team.abbreviation || c.team.shortDisplayName || '';
-  return c.abbreviation || fighterName(c);
-}
-function fighterLogo(c) {
-  if (!c) return '';
-  if (c.team && c.team.logo) return c.team.logo;
-  return '';
-}
-function closeOdds(sideObj) {
-  const c = sideObj && sideObj.close;
-  if (!c || c.odds == null) return null;
-  const n = parseFloat(String(c.odds).replace('+', ''));
-  return isNaN(n) ? null : n;
-}
-function closeLine(sideObj) {
-  const c = sideObj && sideObj.close;
-  if (!c || c.line == null) return null;
-  const n = parseFloat(String(c.line).replace('+', ''));
+function num(v) {
+  if (v == null) return null;
+  const n = parseFloat(String(v).replace('+', '').replace('o', '').replace('u', ''));
   return isNaN(n) ? null : n;
 }
 
-function parseCompetition(ev, comp, sport, idx) {
-  const statusSrc = (comp && comp.status) || ev.status || {};
-  const status = statusSrc.type || statusSrc || {};
-  const competitors = (comp && comp.competitors) || [];
-  const home = competitors.find(c => c.homeAway === 'home') || competitors[0] || {};
-  const away = competitors.find(c => c.homeAway === 'away') || competitors[1] || {};
-  const rawOdds = ((comp && comp.odds) || []).filter(Boolean);
-  const odds = rawOdds[0] || {};
+function parseHeaderEvent(ev, sport) {
+  const comps = ev.competitors || [];
+  const home = comps.find(c => c.homeAway === 'home') || comps[0] || {};
+  const away = comps.find(c => c.homeAway === 'away') || comps[1] || {};
+  const st = (ev.fullStatus && ev.fullStatus.type) || ev.status || {};
+  const type = st.type || st;
+  const state = type.state || '';
+  const odds = ev.odds || {};
   const ps = odds.pointSpread || {};
-  const mlBlock = odds.moneyline || {};
-  const mlH = closeOdds(mlBlock.home) ?? (odds.homeTeamOdds && odds.homeTeamOdds.moneyLine) ?? null;
-  const mlA = closeOdds(mlBlock.away) ?? (odds.awayTeamOdds && odds.awayTeamOdds.moneyLine) ?? null;
-  const homeSpr = closeLine(ps.home);
-  const spread = homeSpr != null ? homeSpr : (odds.spread != null ? Number(odds.spread) : null);
-  const state = status.state || '';
+  const ml = odds.moneyline || {};
+  const homeML = num(odds.home && odds.home.moneyLine) ?? num(odds.homeTeamOdds && odds.homeTeamOdds.moneyLine) ?? num(ml.home && ((ml.home.current && ml.home.current.odds) || (ml.home.close && ml.home.close.odds)));
+  const awayML = num(odds.away && odds.away.moneyLine) ?? num(odds.awayTeamOdds && odds.awayTeamOdds.moneyLine) ?? num(ml.away && ((ml.away.current && ml.away.current.odds) || (ml.away.close && ml.away.close.odds)));
+  const homeSpr = num(ps.home && ((ps.home.current && ps.home.current.line) || (ps.home.close && ps.home.close.line))) ?? num(odds.spread);
+  const spH = num(ps.home && ((ps.home.current && ps.home.current.odds) || (ps.home.close && ps.home.close.odds))) ?? num(odds.homeTeamOdds && odds.homeTeamOdds.spreadOdds);
+  const spA = num(ps.away && ((ps.away.current && ps.away.current.odds) || (ps.away.close && ps.away.close.odds))) ?? num(odds.awayTeamOdds && odds.awayTeamOdds.spreadOdds);
+  const tot = odds.total || {};
+  const total = num(tot.over && ((tot.over.current && tot.over.current.line) || (tot.over.close && tot.over.close.line))) ?? num(odds.overUnder);
   return {
-    id: String((comp && comp.id) || ev.id) + (idx ? '-' + idx : ''),
+    id: String(ev.competitionId || ev.id),
     sport,
-    date: (comp && (comp.date || comp.startDate)) || ev.date || '',
-    status: status.description || '',
-    detail: status.detail || status.shortDetail || ev.name || '',
+    date: ev.date || '',
+    status: type.description || '',
+    detail: type.detail || type.shortDetail || ev.summary || ev.shortName || '',
     state,
     isLive: state === 'in',
-    isFinal: state === 'post',
-    home: { name: fighterName(home) || 'Home', abbrev: fighterAbbr(home), logo: fighterLogo(home), score: home.score ?? '' },
-    away: { name: fighterName(away) || 'Away', abbrev: fighterAbbr(away), logo: fighterLogo(away), score: away.score ?? '' },
-    odds: {
-      mlH: mlH,
-      mlA: mlA,
-      spread: spread,
-      spH: closeOdds(ps.home),
-      spA: closeOdds(ps.away),
-      total: closeLine((odds.total || {}).over) ?? (odds.overUnder != null ? Number(odds.overUnder) : null)
-    }
+    isFinal: state === 'post' || !!type.completed,
+    home: {
+      name: home.displayName || home.name || 'Home',
+      abbrev: home.abbreviation || '',
+      logo: home.logo || '',
+      score: home.score ?? ''
+    },
+    away: {
+      name: away.displayName || away.name || 'Away',
+      abbrev: away.abbreviation || '',
+      logo: away.logo || '',
+      score: away.score ?? ''
+    },
+    odds: { mlH: homeML, mlA: awayML, spread: homeSpr, spH, spA, total }
   };
 }
 
-function parseEvent(ev, sport) {
-  const comps = ev.competitions || [ev];
-  return comps.map((c, i) => parseCompetition(ev, c, sport, i));
-}
-
 async function fetchSport(key) {
-  const data = await getJson(ESPN[key]);
-  if (!data) return [];
-  const out = [];
-  const seen = {};
-  (data.events || []).forEach(ev => {
-    parseEvent(ev, key).forEach(g => {
-      if (g && g.id && !seen[g.id]) { seen[g.id] = true; out.push(g); }
-    });
-  });
-  return out;
+  const pair = HEADER[key];
+  if (!pair) return [];
+  const [sport, league] = pair.split('/');
+  const url = 'https://site.web.api.espn.com/apis/v2/scoreboard/header?sport=' + encodeURIComponent(sport) + '&league=' + encodeURIComponent(league);
+  const data = await getJson(url);
+  const pack = ((((data || {}).sports || [])[0] || {}).leagues || [])[0] || {};
+  return (pack.events || []).map(ev => parseHeaderEvent(ev, key));
 }
 
 function yesProb(m) {
@@ -158,27 +133,19 @@ function attachKalshi(games, markets, sport) {
       if (g.sport !== sport) return;
       const hn = String(g.home.name || '').toLowerCase();
       const an = String(g.away.name || '').toLowerCase();
-      const ha = String(g.home.abbrev || '').toLowerCase();
-      const aa = String(g.away.abbrev || '').toLowerCase();
-      if ((hn && title.indexOf(hn) >= 0) || (ha && ha.length > 2 && title.indexOf(ha) >= 0)) {
-        g.odds.mlH = amer; g.oddsSrc = 'Kalshi';
-      }
-      if ((an && title.indexOf(an) >= 0) || (aa && aa.length > 2 && title.indexOf(aa) >= 0)) {
-        g.odds.mlA = amer; g.oddsSrc = 'Kalshi';
-      }
+      if (hn && title.indexOf(hn.split(' ').pop()) >= 0) { g.odds.mlH = amer; g.oddsSrc = 'Kalshi'; }
+      if (an && title.indexOf(an.split(' ').pop()) >= 0) { g.odds.mlA = amer; g.oddsSrc = 'Kalshi'; }
     });
   });
 }
 
 async function buildOdds() {
-  const keys = Object.keys(ESPN);
+  const keys = Object.keys(HEADER);
   const lists = await Promise.all(keys.map(k => fetchSport(k)));
   const games = [];
   lists.forEach(list => list.forEach(g => games.push(g)));
-  const sports = Object.keys(KALSHI);
-  await Promise.all(sports.map(async sp => {
-    const mk = await fetchKalshi(KALSHI[sp]);
-    attachKalshi(games, mk, sp);
+  await Promise.all(Object.keys(KALSHI).map(async sp => {
+    attachKalshi(games, await fetchKalshi(KALSHI[sp]), sp);
   }));
   return { games, updatedAt: Date.now(), count: games.length };
 }
