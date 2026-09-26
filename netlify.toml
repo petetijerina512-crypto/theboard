@@ -1,0 +1,25 @@
+[build]
+  command = "true"
+  publish = "."
+  functions = "netlify/functions"
+
+[functions."odds-refresh"]
+  schedule = "*/30 * * * *"
+
+[functions."odds-morning"]
+  schedule = "0 11 * * *"
+
+[[redirects]]
+  from = "/api/kalshi"
+  to = "/.netlify/functions/kalshi"
+  status = 200
+
+[[redirects]]
+  from = "/api/odds"
+  to = "/.netlify/functions/odds"
+  status = 200
+
+[[redirects]]
+  from = "/api/odds-api"
+  to = "/.netlify/functions/odds-api"
+  status = 200
