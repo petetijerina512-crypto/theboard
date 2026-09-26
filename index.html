@@ -2999,15 +2999,12 @@
     function stripBadLive(g, o) {
       o = Object.assign({}, o || {});
       if (!g || !g.isLive) return o;
-      if (!liveKalshiFresh(g) || liveBlowout(g) || !liveOddsTrusted(g, o)) {
+      if (liveBlowout(g) || !liveOddsTrusted(g, o) || (typeof mlTooHeavy === 'function' && mlTooHeavy(g))) {
         delete o.mlH; delete o.mlA;
       }
       const lead = typeof leadingSide === 'function' ? leadingSide(g) : null;
       if (lead === 'h' && o.mlH != null && Number(o.mlH) > 0) delete o.mlH;
       if (lead === 'a' && o.mlA != null && Number(o.mlA) > 0) delete o.mlA;
-      if (!liveKalshiFresh(g)) {
-        delete o.spH; delete o.spA; delete o.totO; delete o.totU;
-      }
       return o;
     }
     function mergeGameUpdate(fresh) {
