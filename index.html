@@ -488,8 +488,8 @@
     <div class="app-content" id="appContent">
       <div id="propsPanel" style="display:none;background:#fff;color:#111;">
         <div style="display:flex;gap:8px;padding:8px 10px;background:#f4f6f8;border-bottom:1px solid #d7dee6;">
-          <button type="button" id="propStraightBtn" onclick="setPropMode(false)" style="flex:1;padding:8px;border-radius:6px;border:1px solid #1e3a5f;background:#1e3a5f;color:#fff;font-weight:700;">Straight</button>
-          <button type="button" id="propParlayBtn" onclick="setPropMode(true)" style="flex:1;padding:8px;border-radius:6px;border:1px solid #ccc;background:#fff;color:#1e3a5f;font-weight:700;">Parlay</button>
+          <button type="button" id="propStraightBtn" onclick="setPropMode(false)" style="flex:1;padding:8px;border-radius:6px;border:1px solid #ccc;background:#fff;color:#1e3a5f;font-weight:700;">Straight</button>
+          <button type="button" id="propParlayBtn" onclick="setPropMode(true)" style="flex:1;padding:8px;border-radius:6px;border:1px solid #1e3a5f;background:#1e3a5f;color:#fff;font-weight:700;">Parlay</button>
         </div>
         <div id="propsList"></div>
       </div>
@@ -1609,7 +1609,7 @@
       nhl: 'player_points,player_goals,player_shots_on_goal'
     };
     const propCache = {};
-    window.propAsParlay = false;
+    window.propAsParlay = true;
     function setPropMode(parlay) {
       window.propAsParlay = !!parlay;
       const a = document.getElementById('propStraightBtn');
@@ -1741,6 +1741,8 @@
         });
         if (onProps) renderPropsBoard();
       }
+      if (currentTab === 'parlay') setPropMode(true);
+      if (currentTab === 'straight') setPropMode(false);
       if (currentTab === 'straight' && currentBets.length > 1) {
         currentBets = currentBets.slice(-1);
         renderBetslip();
@@ -4102,12 +4104,13 @@
       try {
         if (odds == null || isNaN(Number(odds))) return;
         const game = allGames.find(g => String(g.id) === String(gid));
-        const parlayMode = currentTab === 'parlay' || (currentTab === 'props' && window.propAsParlay);
+        const parlayMode = currentTab === 'parlay' || window.propAsParlay;
         if (!parlayMode) {
           currentBets = [];
         } else {
           const maxLegs = 6;
-          currentBets = currentBets.filter(b => !(String(b.gid) === String(gid) && b.mkt === mkt));
+          if (mkt === 'prop') currentBets = currentBets.filter(b => !(b.mkt === 'prop' && b.label === label));
+          else currentBets = currentBets.filter(b => !(String(b.gid) === String(gid) && b.mkt === mkt && b.mkt !== 'prop'));
           if (currentBets.length >= maxLegs) return alert('Parlay max is 6 teams.');
           if (Number(odds) > 0 && currentBets.filter(b => Number(b.odds) > 0).length >= 3) {
             return alert('Max 3 plus (+) odds on a parlay.');
