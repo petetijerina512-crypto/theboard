@@ -1,0 +1,175 @@
+exports.handler = async (event) => {
+  const headers = {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
+    'Content-Type': 'application/json'
+  };
+  if (event.httpMethod === 'OPTIONS') return { statusCode: 204, headers, body: '' };
+
+  let store;
+  try {
+    const mod = await import('@netlify/blobs');
+    store = mod.getStore({
+      name: 'board-state',
+      siteID: process.env.NETLIFY_SITE_ID,
+      token: process.env.NETLIFY_AUTH_TOKEN
+    });
+  } catch (e) {
+    try {
+      const { getStore } = require('@netlify/blobs');
+      store = getStore('theboard');
+    } catch (e2) {
+      return { statusCode: 500, headers, body: JSON.stringify({ error: 'blobs unavailable' }) };
+    }
+  }
+
+  function mergeWeeks(a, b) {
+    const map = {};
+    (Array.isArray(a) ? a : []).concat(Array.isArray(b) ? b : []).forEach(w => {
+      if (w && w.userId && w.week) map[w.userId + '|' + w.week] = w;
+    });
+    return Object.keys(map).map(k => map[k]);
+  }
+
+  try {
+    if (event.httpMethod === 'GET') {
+      const raw = await store.get('state', { type: 'json' });
+      return { statusCode: 200, headers, body: JSON.stringify(raw || { users: [], bets: {}, balances: {}, settings: null, updatedAt: 0 }) };
+    }
+    if (event.httpMethod === 'POST') {
+      const incoming = JSON.parse(event.body || '{}');
+      const prev = (await store.get('state', { type: 'json' })) || { users: [], bets: {}, balances: {}, settings: null };
+      const usersMap = {};
+      (prev.users || []).forEach(u => { if (u && u.id) usersMap[u.id] = u; });
+      (incoming.users || []).forEach(u => { if (u && u.id) usersMap[u.id] = Object.assign({}, usersMap[u.id] || {}, u); });
+      Object.keys(usersMap).forEach(id => {
+        if (usersMap[id] && Number(usersMap[id].opening) === 1000) usersMap[id].opening = 0;
+      });
+      Object.keys(usersMap).forEach(id => {
+        if (id === 'admin' && usersMap.Pistol) {
+          const old = usersMap.admin;
+          usersMap.Pistol = Object.assign({}, old, usersMap.Pistol, { id: 'Pistol', role: 'admin' });
+          delete usersMap.admin;
+        }
+      });
+      const users = Object.keys(usersMap).map(k => usersMap[k]);
+      const balanceAt = Object.assign({}, prev.balanceAt || {}, incoming.balanceAt || {});
+      const balances = Object.assign({}, prev.balances || {});
+      const locks = Object.assign({}, prev.balanceLock || {});
+      Object.keys(incoming.balanceUnlock || {}).forEach(id => { if (incoming.balanceUnlock[id]) delete locks[id]; });
+      Object.keys(incoming.balanceLock || {}).forEach(id => {
+        const t = Number(incoming.balanceLock[id] || 0);
+        if (t) locks[id] = Math.max(Number(locks[id] || 0), t);
+      });
+      Object.keys(incoming.balances || {}).forEach(id => {
+        const unlocked = incoming.balanceUnlock && incoming.balanceUnlock[id];
+        if (!unlocked) return;
+        const nextVal = Number(incoming.balances[id]);
+        balances[id] = nextVal;
+        balanceAt[id] = Date.now();
+        locks[id] = Date.now();
+      });
+      function ticketNet(bt) {
+        if (!bt || (bt.status !== 'won' && bt.status !== 'lost')) return 0;
+        const stake = Number(bt.stake || 0);
+        if (bt.status === 'lost') return -stake;
+        const sels = bt.selections || [];
+        if (sels.length !== 1) return 0;
+        const o = Number(sels[0].lockedOdds != null ? sels[0].lockedOdds : sels[0].odds || 0);
+        if (!o) return 0;
+        return o > 0 ? stake * (o / 100) : stake * (100 / Math.abs(o));
+      }
+      const bets = Object.assign({}, prev.bets || {});
+      Object.keys(bets).forEach(id => {
+        bets[id] = (bets[id] || []).filter(bt => {
+          const when = String((bt && bt.time) || '');
+          const lab = String((((bt || {}).selections || [])[0] || {}).label || '').toLowerCase();
+          if (lab.indexOf('king green') >= 0 || lab.indexOf('ribovics') >= 0) return false;
+          return when.slice(0, 10) >= '2026-10-06';
+        });
+      });
+      Object.keys(bets).forEach(id => {
+        bets[id] = (bets[id] || []).map(bt => {
+          if (bt && bt.id === 'b1792190141750') { const next = Object.assign({}, bt, { status: 'lost' }); (next.selections||[]).forEach(s => { if (s) s.result = 'lost'; }); return next; }
+          if (bt && bt.id === 'b1792201458545') { const next = Object.assign({}, bt, { status: 'lost' }); (next.selections||[]).forEach(s => { if (s) s.result = 'lost'; }); return next; }
+          if (bt && (bt.id === 'b1792112419360' || bt.id === 'b1792112458574' || bt.id === 'b1792112458573' || bt.id === 'b1792124315187')) { const next = Object.assign({}, bt, { status: 'lost' }); (next.selections||[]).forEach(s => { if (s) s.result = 'lost'; }); return next; }
+          
+          if (bt && (bt.id === 'b1791936910153' || bt.id === 'b1792102007561' || bt.id === 'b1792102043026' || bt.id === 'b1792118452746')) { const next = Object.assign({}, bt, { status: 'won' }); (next.selections||[]).forEach(s => { if (s) s.result = 'won'; }); return next; }
+          if (bt && (bt.id === 'b1792117145095' || bt.id === 'b1792079169448')) { const next = Object.assign({}, bt, { status: 'lost' }); (next.selections||[]).forEach(s => { if (s) s.result = 'lost'; }); return next; }
+          
+          if (bt && bt.id === 'b1792102045340') { const next = Object.assign({}, bt, { status: 'cancelled' }); return next; }
+          if (bt && bt.id === 'b1792024585555') { const next = Object.assign({}, bt, { status: 'lost' }); (next.selections||[]).forEach(s => { if (s) s.result = 'lost'; }); return next; }
+          if (bt && bt.id === 'b1792019978341') { const next = Object.assign({}, bt, { status: 'lost' }); (next.selections||[]).forEach(s => { if (s) s.result = 'lost'; }); return next; }
+          if (bt && (bt.id === 'b1791948459515' || bt.id === 'b1791948607841')) { const next = Object.assign({}, bt, { status: 'won' }); (next.selections||[]).forEach(s => { if (s) s.result = 'won'; }); return next; }
+          if (bt && (bt.id === 'b1791932501673' || bt.id === 'b1791939856078')) { const next = Object.assign({}, bt, { status: 'won' }); (next.selections||[]).forEach(s => { if (s) s.result = 'won'; }); return next; }
+          if (bt && (bt.id === 'b1791941532155' || bt.id === 'b1791932550748')) { const next = Object.assign({}, bt, { status: 'lost' }); (next.selections||[]).forEach(s => { if (s) s.result = 'lost'; }); return next; }
+          if (bt && bt.id === 'b1791940362278') { const next = Object.assign({}, bt, { status: 'won', settledAt: '2026-10-14T01:36:00.000Z' }); (next.selections||[]).forEach(s => { if (s) s.result = 'won'; }); return next; }
+          if (bt && bt.id === 'b1791763733006') { const next = Object.assign({}, bt, { status: 'won', settledAt: '2026-10-12T04:00:00.000Z' }); (next.selections||[]).forEach(s => { if (s) s.result = 'won'; }); return next; }
+          if (bt && bt.id === 'b1791749762257') { const next = Object.assign({}, bt, { status: 'lost', settledAt: '2026-10-11T21:30:00.000Z' }); (next.selections||[]).forEach(s => { if (s) s.result = 'lost'; }); return next; }
+          if (!bt || (bt.status !== 'lost' && bt.status !== 'won')) return bt;
+          const start = new Date(((bt.selections || [])[0] || {}).gameDate || 0).getTime();
+          const settled = new Date(bt.settledAt || 0).getTime();
+          const early = start && settled && (settled - start) < 4 * 60 * 60 * 1000 || bt.id === "b1791660721540";
+          if (bt.id === 'b1791660721540') { const next = Object.assign({}, bt, { settledAt: '2026-10-10T22:00:00.000Z' }); return next; }
+          if (!early) return bt;
+          const next = Object.assign({}, bt, { status: 'open', paid: false });
+          delete next.settledAt;
+          (next.selections || []).forEach(s => { if (s) delete s.result; });
+          return next;
+        });
+      });
+      Object.keys(incoming.bets || {}).forEach(id => {
+        const a = Array.isArray(bets[id]) ? bets[id] : [];
+        const b = Array.isArray(incoming.bets[id]) ? incoming.bets[id] : [];
+        if (!b.length && a.length) { bets[id] = a; return; }
+        const map = {};
+        a.concat(b).forEach(bt => {
+          if (!bt || !bt.id) return;
+          const prev = map[bt.id];
+          if (prev && (prev.status === 'won' || prev.status === 'lost' || prev.status === 'push' || prev.status === 'cancelled') && bt.status !== prev.status && !bt.forceStatus) return;
+          map[bt.id] = bt;
+        });
+        const merged = Object.keys(map).map(k => map[k]);
+        bets[id] = merged.length >= a.length ? merged : a;
+      });
+      const bases = Object.assign({}, prev.balanceBase || {});
+      const baseAt = Object.assign({}, prev.balanceBaseAt || {});
+      Object.keys(incoming.balanceUnlock || {}).forEach(id => {
+        if (incoming.balanceUnlock[id] && incoming.balances && incoming.balances[id] != null) {
+          bases[id] = Number(incoming.balances[id]);
+          baseAt[id] = Date.now();
+        }
+      });
+      Object.keys(bets).forEach(id => {
+        const start = Number(baseAt[id] || 0);
+        let net = 0;
+        (bets[id] || []).forEach(bt => {
+          if (!bt || (bt.status !== 'won' && bt.status !== 'lost')) return;
+          const when = new Date(bt.settledAt || bt.time || 0).getTime();
+          if (start && when && when <= start) return;
+          net += ticketNet(bt);
+        });
+        balances[id] = Math.round(((Number(bases[id] || 0)) + net) * 100) / 100;
+      });
+      const next = {
+        users,
+        balances,
+        balanceBase: bases,
+        balanceBaseAt: baseAt,
+        balanceAt,
+        balanceLock: locks,
+        bets,
+        settings: incoming.settings || prev.settings || null,
+        results: incoming.results || prev.results || {},
+        weeks: mergeWeeks(prev.weeks, incoming.weeks),
+        updatedAt: Date.now()
+      };
+      await store.setJSON('state', next);
+      return { statusCode: 200, headers, body: JSON.stringify({ ok: true, users: next.users.length, updatedAt: next.updatedAt }) };
+    }
+    return { statusCode: 405, headers, body: JSON.stringify({ error: 'method' }) };
+  } catch (e) {
+    return { statusCode: 500, headers, body: JSON.stringify({ error: String(e.message || e) }) };
+  }
+};
