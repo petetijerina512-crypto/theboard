@@ -1,0 +1,10 @@
+{
+  "name": "theboard",
+  "private": true,
+  "scripts": {
+    "build": "echo no-build"
+  },
+  "dependencies": {
+    "@netlify/blobs": "10.7.13"
+  }
+}
