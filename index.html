@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="0" />
+  <meta charset="UTF-8" />
+  <meta name="board-build" content="1136" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <title>The Board</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230d1b2a'/%3E%3Ctext x='16' y='23' font-family='Arial' font-weight='700' font-size='19' text-anchor='middle' fill='%23fff'%3EB%3C/text%3E%3C/svg%3E" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="preload" href="/assets/app.09c1d5827f.js" as="script">
+  <script>
+    (window.__boardVersionCheck = function(){
+      var here = '1136';
+      // (1133) only the first 1 KB of the page (the board-build tag near the top), not the whole 540 KB file.
+      // A server that ignores Range just sends the whole page, and the ADMIN label still works then.
+      fetch('/index.html?fresh=' + Date.now(), { cache: 'no-store', headers: { Range: 'bytes=0-1023' } }).then(function(r){ return r.text(); }).then(function(html){
+        html = String(html||'');
+        var m = html.match(/name="board-build"\s+content="(\d+)"/) || html.match(/ADMIN\s+(\d+)/);
+        if (m && m[1] && m[1] !== here) location.replace('/?v=' + m[1] + '&t=' + Date.now());
+      }).catch(function(){});
+    })();   // (1136) also run again if a file can't be loaded later (a newer board went up)
+    // (1136) an admin's phone also starts downloading the casino + admin files now (players never download them)
+    (function(){ try { var s = JSON.parse(localStorage.getItem('sunbook_session') || 'null'); if (s && s.role === 'admin' && localStorage.getItem('board_auth')) ['/assets/casino.343faf94a9.js', '/assets/admin.a056552066.js'].forEach(function (h) { var l = document.createElement('link'); l.rel = 'preload'; l.as = 'script'; l.href = h; document.head.appendChild(l); }); } catch (e) {} })();
+  </script>
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Oswald:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/assets/board.956b9ab924.css">
+</head>
+<body>
+
+  <!-- LOGIN -->
+  <div id="view-login">
+    <div class="splash">
+      <div class="splash-bg" id="splashBg"></div>
+      <div class="splash-content">
+        <div class="splash-logo">
+          <div class="logo-text">THE BOARD</div>
+        </div>
+
+        <div class="hero-card" id="heroCard">
+          <img class="hero-img" id="heroImg" alt="Sports" />
+          <div class="hero-fade"></div>
+          <div class="hero-caption">
+            <div class="hero-tag" id="heroTag">TODAY</div>
+            <div class="hero-title" id="heroTitle">The Board</div>
+          </div>
+        </div>
+
+        <div class="login-box">
+          <div class="error-msg" id="loginError"></div>
+          <form onsubmit="if (window.handleLogin) handleLogin(event); else event.preventDefault();">
+            <div class="field">
+              <div class="field-icon"><svg viewBox="0 0 24 24"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg></div>
+              <input type="text" id="loginUser" placeholder="User ID" required autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" />
+            </div>
+            <div class="field">
+              <div class="field-icon"><svg viewBox="0 0 24 24"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2z"/></svg></div>
+              <input type="password" id="loginPass" placeholder="Password" required autocomplete="current-password" />
+            </div>
+            <button type="submit" class="btn-login">SIGN IN</button>
+          </form>
+        </div>
+
+        <div class="login-footer">Copyright © 2026 The Board</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MAIN APP -->
+  <div id="view-app" class="hidden">
+    <div class="app-header">
+      <div class="star-btn" role="button" onclick="goHome()" title="Home"><svg viewBox="0 0 24 24"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg></div>
+      <div class="id-box"><div class="label">ACCOUNT ID</div><div class="value" id="dispId">—</div></div>
+      <div class="bal-box" onclick="openBalanceSheet()"><div class="label">BALANCE</div><div class="value pos" id="dispBal">$1,000.00</div></div>
+
+      <button type="button" id="adminHeaderBtn" onclick="goAdmin()" style="display:none;background:#1e3a5f;color:#fff;border:none;padding:6px 10px;border-radius:4px;font-size:0.7rem;font-weight:800;letter-spacing:0.06em;cursor:pointer;">ADMIN 1136</button>
+      <div class="menu-btn" onclick="toggleMenu()">☰</div>
+    </div>
+
+    <div class="tabs">
+      <button class="tab active" data-tab="straight" onclick="setTab(this)"><span class="icon">S</span>STRAIGHT</button>
+      <button class="tab" data-tab="parlay" onclick="setTab(this)"><span class="icon">P</span>PARLAY</button>
+      <button class="tab" data-tab="props" onclick="setTab(this)"><span class="icon">P</span>PROPS</button>
+      <button class="tab" id="casinoTab" type="button" onclick="openCasino()" style="display:none;"><span class="icon">🃏</span>CASINO</button>
+    </div>
+    <div class="app-content" id="appContent">
+      <div id="propsPanel" style="display:none;background:#fff;color:#111;">
+        <div style="display:flex;gap:8px;padding:8px 10px;background:#f4f6f8;border-bottom:1px solid #d7dee6;">
+          <button type="button" id="propStraightBtn" onclick="setPropMode(false)" style="flex:1;padding:8px;border-radius:6px;border:1px solid #ccc;background:#fff;color:#1e3a5f;font-weight:700;">Straight</button>
+          <button type="button" id="propParlayBtn" onclick="setPropMode(true)" style="flex:1;padding:8px;border-radius:6px;border:1px solid #1e3a5f;background:#1e3a5f;color:#fff;font-weight:700;">Parlay</button>
+        </div>
+        <div id="propHint" style="display:none;padding:8px 10px;background:#e8f5e9;color:#1b5e20;font-size:0.8rem;font-weight:700;">Prop added. Add another prop here, or switch to Parlay and add a spread, total, or moneyline. Then tap View.</div>
+        <div id="propsList"></div>
+      </div>
+      <div id="periodBoard" style="display:none;"></div>
+      <div id="gamePage" style="display:none;"></div>
+      <div id="gameFocus"></div>
+
+      <div class="section-bar live"><span class="pulse">PULSE</span> LIVE</div>
+      <div id="liveSection"></div>
+
+      <div class="section-bar">LEAGUES</div>
+      <div id="leaguesList"></div>
+    </div>
+    <!-- (1135) multi-sport: the picked leagues, shown together -->
+    <div id="sportPickBar"><div class="txt">✓ <span id="sportPickTxt"></span></div><button type="button" class="clr" onclick="clearSportPicks(event)">Clear</button><button type="button" class="go" id="sportPickGo" onclick="showSportPicks()">Show ›</button></div>
+
+    <div class="bet-bar" id="betBar" onclick="openBetslip()" style="display:none">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <div class="count" id="betCount">0</div>
+        <div class="info">Bet Slip</div>
+      </div>
+      <button>View</button>
+    </div>
+  </div>
+
+  <!-- Bet slip panel -->
+  <div id="view-pending" class="hidden">
+    <div class="admin-header">
+      <button type="button" class="home-star" onclick="goHome()" aria-label="Home" title="Home"><svg viewBox="0 0 24 24"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg></button>
+      <strong>PENDING</strong>
+      <button type="button" onclick="showView('app')" style="background:#1e3a5f;color:#fff;border:none;padding:6px 12px;border-radius:4px;cursor:pointer;">← Back</button>
+    </div>
+    <div class="admin-body" id="pendingPageBody" style="background:#111;color:#eee;"></div>
+  </div>
+
+  <!-- (1125) Casino: admins only while testing -->
+  <div id="view-casino" class="hidden">
+    <div class="cas-header">
+      <button type="button" class="home-star" onclick="goHome()" aria-label="Home" title="Home"><svg viewBox="0 0 24 24"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg></button>
+      <button type="button" onclick="closeCasino()">← Back</button>
+      <strong>🃏 CASINO</strong>
+      <div class="cas-bal">BALANCE<br><b id="casBal">$0.00</b></div>
+    </div>
+    <div class="cas-body" id="casBody"></div>
+  </div>
+
+  <div id="appToast" role="status" aria-live="polite"></div>
+  <div class="overlay" id="overlay" onclick="onOverlayClick()"></div>
+  <div class="betslip-panel" id="betslipPanel">
+    <div class="ph"><span>Bet Slip</span><button type="button" class="sheet-x" aria-label="Close bet slip" onclick="closeBetslip()">✕</button></div>
+    <div class="pb" id="betslipBody"><div style="text-align:center;color:#999;padding:20px;">No selections yet</div></div>
+    <div class="pf" id="slipFooter">
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;"><span style="font-size:1.2rem;font-weight:700;">$</span><input type="number" id="stakeInput" placeholder="Stake" value="20" min="1" inputmode="decimal" onfocus="try{this.select()}catch(e){}" oninput="updatePotential()" style="flex:1;padding:12px;font-size:1.1rem;border:1px solid #ccc;border-radius:6px;" /></div>
+      <div class="pot"><span>To Win</span><span id="potentialWin">$0.00</span></div>
+      <div id="placeNote" style="font-size:0.75rem;color:#c62828;font-weight:700;min-height:16px;"></div>
+      <button class="place" id="reviewBtn" type="button" disabled>Review Bet</button>
+    </div>
+    <div class="pf" id="confirmFooter" style="display:none;gap:8px;">
+      <button type="button" id="backSlipBtn" style="flex:1;padding:12px;border:1px solid #ccc;border-radius:6px;background:#fff;font-weight:700;">Go back</button>
+      <button class="place" id="confirmPlaceBtn2" type="button" onclick="window.placeBet()">Confirm & Place</button>
+    </div>
+  </div>
+
+  <div class="betslip-panel" id="checkoutPanel" style="z-index:560;">
+    <div class="ph"><span>Confirm ticket</span><button onclick="closeCheckout()" style="background:none;border:none;font-size:1.2rem;cursor:pointer;">✕</button></div>
+    <div class="pb" id="checkoutBody"></div>
+    <div class="pf">
+      <button type="button" onclick="closeCheckout()" style="flex:1;padding:12px;border:1px solid #ccc;border-radius:6px;background:#fff;font-weight:700;">Go back</button>
+      <button class="place" id="confirmPlaceBtn" onclick="placeBet()">Confirm & Place</button>
+    </div>
+  </div>
+
+  <!-- Side menu -->
+  <div class="betslip-panel" id="histPanel">
+    <div class="ph"><span>Pending & History</span><div class="ph-tools"><button type="button" class="home-star" onclick="goHome()" aria-label="Home" title="Home"><svg viewBox="0 0 24 24"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg></button><button type="button" class="sheet-x" aria-label="Close history" onclick="closeHistory()">✕</button></div></div>
+    <div class="pb" id="histBody"></div>
+  </div>
+  <div class="side-menu" id="sideMenu">
+    <div class="menu-x"><button type="button" id="menuCloseBtn" aria-label="Close menu" onclick="closeAll()">✕</button></div>
+    <div class="mi" onclick="histMode='day';histDay=ymdLocal(new Date());if(!amAdmin())histUser=null;openPendingSheet(histDay);">Pending</div>
+    <div class="mi" onclick="refreshScoresTap()">↻ Refresh Scores</div>
+    <div class="mi" id="casinoMenuItem" style="display:none;" onclick="openCasino()">🃏 Casino</div>
+        <div class="mi hidden" id="adminMenuItem" onclick="goAdmin(); closeAll();">Admin Panel</div>
+    <div class="mi" style="color:#ef5350;" onclick="logout()">Logout</div>
+  </div>
+
+  <!-- Team Picker -->
+  <div class="betslip-panel" id="teamPicker" style="max-height:80vh;">
+    <div class="ph"><span>Choose Your Team</span><button onclick="closeTeamPicker()" style="background:none;border:none;font-size:1.2rem;cursor:pointer;">✕</button></div>
+    <div class="pb" id="teamPickerBody" style="padding:8px;"></div>
+  </div>
+
+  <!-- ADMIN -->
+  <div id="view-admin" class="hidden">
+    <div class="admin-header">
+      <button type="button" class="home-star" onclick="goHome()" aria-label="Home" title="Home"><svg viewBox="0 0 24 24"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg></button>
+      <strong>The Board Admin</strong>
+      <button onclick="showView('app')" style="background:#1e3a5f;color:#fff;border:none;padding:6px 12px;border-radius:4px;cursor:pointer;">← Back</button>
+    </div>
+    <div class="admin-body">
+      <!-- (1119) admin screen grouped: pending first, then what needs the admin, then the rarely used tools (collapsed). Same element ids and functions as before. -->
+      <div class="admin-card" data-open="1">
+        <h3>Pending bets</h3>
+        <p class="adm-note">Pending bets do not move money until they are graded (Hit / Miss here, or the auto-grader). Cancel does not change the balance.</p>
+        <div id="betsList"><div style="color:#888;font-size:0.85rem;">Loading…</div></div>
+      </div>
+
+      <div class="admin-card" data-open="1" id="needsYouCard">
+        <h3>Needs you</h3>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;"><div id="graderStatus" style="flex:1;font-size:0.75rem;color:#666;">Grader: checking…</div><button type="button" id="gradeNowBtn" onclick="gradeNow()" class="adm-btn">Grade now</button></div>
+        <div id="graderWaiting" style="font-size:0.75rem;color:#b26a00;margin-bottom:8px;"></div>
+        <p class="adm-sub">Finished games still open</p>
+        <p class="adm-note">Hit adds profit, Miss subtracts stake, Push leaves the balance.</p>
+        <div id="gradeQueue"><div style="color:#888;font-size:0.85rem;">Loading…</div></div>
+      </div>
+
+      <div class="admin-group-title">Casino (admins + players you turn on)</div>
+      <div class="admin-card" id="casinoCard">
+        <h3>Casino</h3>
+        <p class="adm-note">Blackjack, Roulette, Video Poker, Slots. Main switch, a switch per game, bet limits, every hand / spin with Verify and Void. Results are booked on the player's balance like graded bets.</p>
+        <div id="casinoAdmin" style="font-size:0.85rem;">Open the card to load.</div>
+      </div>
+      <div class="admin-group-title">Users &amp; balances</div>
+      <div class="admin-card" data-open="1">
+        <h3>Accounts &amp; balances</h3>
+        <p class="adm-note">Most active first (last time on the board, login, or bet). <span style="color:#2e7d32;font-weight:700;">●</span> = on the board in the last 10 min. Times are Central (CT).</p>
+        <div id="accountsList"></div>
+      </div>
+      <div class="admin-card" data-open="1" id="loginsCard">
+        <h3>Recent logins</h3>
+        <p class="adm-note">Who signed in, when (CT) and on what device. Newest first, last 30.</p>
+        <div id="loginsList" style="font-size:0.8rem;color:#333;">Loading…</div>
+      </div>
+      <div class="admin-card">
+        <h3>Add account</h3>
+        <input type="text" id="newUserId" placeholder="User ID" />
+        <input type="password" id="newPassword" placeholder="Password" />
+        <input type="number" id="newStartBal" placeholder="Starting balance (default 0)" value="0" />
+        <button onclick="addAccount()">Add Account</button>
+        <div class="error-msg" id="addError" style="margin-top:8px;"></div>
+      </div>
+      <div class="admin-card">
+        <h3>Account defaults</h3>
+        <p class="adm-note">Default starting balance for new accounts</p>
+        <div class="adm-row">
+          <input type="number" id="defaultStartInput" placeholder="0" value="0" style="flex:1;padding:8px;border:1px solid #ccc;border-radius:6px;" />
+          <button onclick="saveDefaultStart()" class="adm-btn">Save</button>
+        </div>
+        <p class="adm-note">Global credit limit (how far below $0 any account may go; each account can have its own under Accounts → Limits)</p>
+        <div class="adm-row">
+          <input type="number" id="globalNegInput" placeholder="-500" style="flex:1;padding:8px;border:1px solid #ccc;border-radius:6px;" />
+          <button onclick="saveGlobalNeg()" class="adm-btn">Save</button>
+        </div>
+        <div style="margin-top:8px;font-size:0.8rem;color:#2e7d32;" id="settingsMsg"></div>
+      </div>
+
+      <div class="admin-group-title">Settle-up &amp; weekly</div>
+      <div class="admin-card">
+        <h3>Balance changes</h3>
+        <p class="adm-note">Every graded ticket and balance edit, newest first. Weekly cash out / Clear to $0 are on each account above; Bet history opens the week and month calendar.</p>
+        <div id="balanceLog" style="font-size:0.8rem;color:#444;">Loading…</div>
+      </div>
+
+      <div class="admin-group-title">Lines &amp; odds tools</div>
+      <div class="admin-card">
+        <h3>Odds feed</h3>
+        <div id="oddsCredits" class="acc-keep" style="font-size:0.8rem;color:#1e3a5f;font-weight:700;margin:-4px 0 4px;">Odds API credits: checking…</div>
+        <p class="adm-note">Odds refresh every minute and new next-day games are pulled automatically. Users never see the source tag.</p>
+        <button onclick="refreshAll(true).then(renderKalshiAdmin)" class="adm-btn" style="margin-bottom:10px;">Refresh all sports now</button>
+        <p class="adm-sub">Posted odds by game (source check)</p>
+        <div id="kalshiAdminList" style="font-size:0.85rem;color:#444;">Open this panel after games load.</div>
+      </div>
+      <div class="admin-card">
+        <h3>Betting limits</h3>
+        <div style="margin-bottom:14px;">
+          <label style="display:flex;align-items:center;gap:8px;font-weight:600;">
+            <input type="checkbox" id="bettingEnabledChk" onchange="toggleBettingEnabled()" style="width:auto;margin:0;" />
+            Betting enabled (master switch)
+          </label>
+          <p class="adm-note" style="margin-top:4px;">Uncheck to stop ALL betting instantly</p>
+        </div>
+        <p class="adm-note">Min / max stake per bet</p>
+        <div class="adm-row">
+          <input type="number" id="minStakeInput" placeholder="Min $" style="flex:1;padding:8px;border:1px solid #ccc;border-radius:6px;" />
+          <input type="number" id="maxStakeInput" placeholder="Max $" style="flex:1;padding:8px;border:1px solid #ccc;border-radius:6px;" />
+          <button onclick="saveStakeLimits()" class="adm-btn">Save</button>
+        </div>
+        <p class="adm-note">Parlay legs (min / max, default max 6)</p>
+        <div class="adm-row">
+          <input type="number" id="minParlayInput" placeholder="Min legs" style="flex:1;padding:8px;border:1px solid #ccc;border-radius:6px;" />
+          <input type="number" id="maxParlayInput" placeholder="Max legs" style="flex:1;padding:8px;border:1px solid #ccc;border-radius:6px;" />
+          <button onclick="saveParlayLimits()" class="adm-btn">Save</button>
+        </div>
+        <p class="adm-note">Max plus (+) odds legs on a parlay (default 3). Plus odds = underdog, e.g. +130.</p>
+        <div class="adm-row">
+          <input type="number" id="maxFavInput" placeholder="Max +odds" min="0" style="flex:1;padding:8px;border:1px solid #ccc;border-radius:6px;" />
+          <button onclick="saveMaxFavorites()" class="adm-btn">Save</button>
+        </div>
+        <div class="bookie-msg" style="margin-top:8px;font-size:0.8rem;color:#2e7d32;"></div>
+      </div>
+      <div class="admin-card">
+        <h3>Sports &amp; games on/off</h3>
+        <p class="adm-note">Tap a sport to turn it off or on</p>
+        <div id="sportToggles" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px;"></div>
+        <p class="adm-sub">Block single games</p>
+        <p class="adm-note">Tap a game to block / unblock betting on it</p>
+        <div id="blockGamesList" style="max-height:220px;overflow-y:auto;border:1px solid #e0e0e0;border-radius:6px;padding:8px;background:#fafafa;margin-bottom:8px;"></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+          <div id="blockedGamesSummary" style="font-size:0.8rem;color:#666;"></div>
+          <button onclick="clearAllBlockedGames()" class="adm-btn adm-btn-grey">Clear all blocks</button>
+        </div>
+        <div style="margin-top:8px;font-size:0.8rem;color:#2e7d32;" id="bookieMsg" class="bookie-msg"></div>
+      </div>
+
+      <div class="admin-group-title">Alerts &amp; system</div>
+      <div class="admin-card">
+        <h3>Alerts (Telegram)</h3>
+        <p class="adm-note">The server sends a Telegram alert for every placed bet. There are no alert settings on this screen; the bot and chat are set in the Netlify environment.</p>
+      </div>
+      <div class="admin-card">
+        <h3>System</h3>
+        <p class="adm-note">Recomputes every balance from settled tickets. Rarely needed; it asks before running.</p>
+        <button type="button" onclick="rebuildAllBalances()" class="adm-btn">Rebuild all balances from tickets</button>
+        <p class="adm-note" style="margin-top:10px;" id="adminVersionNote"></p>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // (1136) The Board's code lives in /assets as files the phone keeps (their names change whenever the code
+    // changes, so a phone never mixes old and new pieces). Players download only the main file; an admin's phone
+    // also gets the casino and admin files, and a player the casino is turned on for gets the casino file.
+    (function () {
+      var FILES = { app: '/assets/app.09c1d5827f.js', casino: '/assets/casino.343faf94a9.js', admin: '/assets/admin.a056552066.js' };
+      var NEEDS = { admin: ['casino'] };
+      var asked = {};
+      function inject(name, attempt) {
+        return new Promise(function (ok, bad) {
+          var s = document.createElement('script');
+          s.src = FILES[name] + (attempt ? '?r=' + Date.now() : '');   // a retry never reuses a failed (maybe cached) answer
+          s.async = false;   // downloads in parallel, runs in the order asked (main file first)
+          s.onload = function () { ok(); };
+          s.onerror = function () { try { s.parentNode.removeChild(s); } catch (e) {} bad(new Error('could not load ' + name)); };
+          document.body.appendChild(s);
+        });
+      }
+      function get(name, attempt, maxTries) {
+        return inject(name, attempt).catch(function (e) {
+          if (attempt + 1 >= maxTries) throw e;
+          return new Promise(function (r) { setTimeout(r, attempt ? Math.min(5000, 1500 * attempt) : 300); }).then(function () { return get(name, attempt + 1, maxTries); });
+        });
+      }
+      function ask(names, maxTries) {
+        var out = [];
+        names.forEach(function (n) {
+          (NEEDS[n] || []).forEach(function (d) { if (names.indexOf(d) < 0 && !asked[d]) out.push(ask([d], maxTries)); });
+          if (!asked[n]) {
+            asked[n] = get(n, 0, maxTries);
+            asked[n].catch(function () { delete asked[n]; });
+          }
+          out.push(asked[n]);
+        });
+        return Promise.all(out);
+      }
+      // later on (admin button, casino tab): the stand-in functions in the main file call this
+      window.__loadChunk = function (name) {
+        if (!FILES[name]) return Promise.reject(new Error('no file ' + name));
+        return ask((NEEDS[name] || []).concat([name]), 3).catch(function (e) {
+          try { if (window.__boardVersionCheck) window.__boardVersionCheck(); } catch (x) {}   // a newer board went up: reload into it
+          throw e;
+        });
+      };
+      var admin = false;
+      try { var s0 = JSON.parse(localStorage.getItem('sunbook_session') || 'null'); admin = !!(s0 && s0.role === 'admin' && localStorage.getItem('board_auth')); } catch (e) {}
+      var started = false;
+      function start() {
+        if (started || typeof window.__bootBoard !== 'function') return false;
+        started = true;
+        var note = document.getElementById('boardLoadNote'); if (note) note.parentNode.removeChild(note);
+        window.__bootBoard();
+        return true;
+      }
+      function showNote() {
+        if (document.getElementById('boardLoadNote')) return;
+        var d = document.createElement('div');
+        d.id = 'boardLoadNote';
+        d.setAttribute('style', 'position:fixed;left:0;right:0;top:0;z-index:99999;background:#1e3a5f;color:#fff;text-align:center;font:600 14px/1.3 -apple-system,Arial,sans-serif;padding:calc(env(safe-area-inset-top) + 10px) 12px 10px;');
+        d.textContent = 'Updating The Board… one moment';
+        document.body.appendChild(d);
+      }
+      // the main file must load; while it can't (no signal, or the update is still going up) keep trying
+      var tries = 0;
+      function boot() {
+        var main = ask(['app'], 2);
+        var extra = admin ? ask(['casino', 'admin'], 3).catch(function () {}) : Promise.resolve();
+        main.then(function () { return extra; }).then(function () {
+          if (!start()) { showNote(); setTimeout(retry, 4000); }
+        }, function () { showNote(); setTimeout(retry, 4000); });
+      }
+      function retry() {
+        tries++;
+        if (tries === 3) { try { if (window.__boardVersionCheck) window.__boardVersionCheck(); } catch (e) {} }
+        if (tries > 40) { location.replace('/?t=' + Date.now()); return; }
+        if (typeof window.__bootBoard === 'function') { start(); return; }
+        delete asked.app;
+        boot();
+      }
+      boot();
+    })();
+  </script>
+</body>
+</html>
