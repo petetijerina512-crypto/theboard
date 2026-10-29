@@ -192,8 +192,11 @@ function normalizeExtras(event) {
 }
 
 function normalizeProps(event) {
-  const book = pickBook(event);
-  if (!book) return [];
+  // (1137) each prop market from the first book (DraftKings, FanDuel, BetMGM, Caesars, Bovada, then any) that has it.
+  // It used to take every prop from DraftKings only, so a market DraftKings had not posted yet was missing even when
+  // FanDuel had it. The bet-time check reads this same list, so the price checked is the price shown.
+  const books = booksInOrder(event);
+  if (!books.length) return [];
   const labels = {
     player_pass_yds: 'Pass Yds', player_rush_yds: 'Rush Yds', player_receptions: 'Receptions',
     player_anytime_td: 'Anytime TD', player_pass_tds: 'Pass TDs',
@@ -212,7 +215,13 @@ function normalizeProps(event) {
     pitcher_outs: 'Pitcher Outs', pitcher_earned_runs: 'Earned Runs', pitcher_hits_allowed: 'Hits Allowed'
   };
   const out = [];
-  (book.markets || []).forEach(m => {
+  const taken = {};
+  const mkts = [];
+  books.forEach(b => (b.markets || []).forEach(m => {
+    if (!m || !m.key || taken[m.key]) return;
+    taken[m.key] = 1; mkts.push(m);
+  }));
+  mkts.forEach(m => {
     if (!m || !m.key || m.key.indexOf('alternate') >= 0) return;
     if (!labels[m.key]) return;
     const byPlayer = {};
@@ -243,8 +252,16 @@ function normalizePeriod(sport, events, period) {
   const totKey = keys[1];
   const mlKey = keys[2];   // (1130) period moneyline (a tied period grades as a loss: house rule)
   return (events || []).map(ev => {
-    const book = pickBook(ev);
-    const mk = book ? marketMap(book) : {};
+    // (1137) each period market (spread, total, moneyline) from the first book in order that posts it,
+    // instead of everything from DraftKings only (a 1st-half spread FanDuel had was lost when DraftKings had none).
+    const order = booksInOrder(ev);
+    const bookFor = key => order.find(b => (b.markets || []).some(x => x.key === key && (x.outcomes || []).length)) || null;
+    const bSp = bookFor(sprKey), bTot = bookFor(totKey), bMl = bookFor(mlKey);
+    const book = bSp || bTot || bMl || pickBook(ev);
+    const mk = {};
+    if (bSp) mk[sprKey] = marketMap(bSp)[sprKey];
+    if (bTot) mk[totKey] = marketMap(bTot)[totKey];
+    if (bMl) mk[mlKey] = marketMap(bMl)[mlKey];
     const spr = mk[sprKey] || [];
     const tot = mk[totKey] || [];
     const over = tot.find(o => /^over$/i.test(o.name));
@@ -265,9 +282,9 @@ function normalizePeriod(sport, events, period) {
       totU: under && under.price != null ? Number(under.price) : null,
       mlH: priceFor(ml, ev.home_team),
       mlA: priceFor(ml, ev.away_team),
-      spUpd: marketUpd(book, sprKey),
-      totUpd: marketUpd(book, totKey),
-      mlUpd: mk[mlKey] ? marketUpd(book, mlKey) : null,
+      spUpd: marketUpd(bSp, sprKey),
+      totUpd: marketUpd(bTot, totKey),
+      mlUpd: mk[mlKey] ? marketUpd(bMl, mlKey) : null,
       book: book ? book.key : null
     };
   }).filter(g => g.spread != null || g.total != null || g.mlH != null || g.mlA != null);
@@ -621,7 +638,7 @@ async function runQuery(ctx, key, params, maxAge) {
 
   const eventId = String(params.event || params.eventId || '').trim();
   if (eventId) {
-    const extraMkts = String(params.markets || '').replace(/[^a-z0-9_,]/g,'').slice(0, 240);
+    const extraMkts = cleanMkts(params.markets);   // (1137) was cut at 240 characters: that broke the NFL props list (243)
     const evKey = 'ev:' + sport + ':' + eventId + ':' + extraMkts;
     return (await cached(ctx, evKey, j => eventTtl(extraMkts, j), maxAge, async () => {
       const mktQs = extraMkts ? extraMkts : 'h2h,spreads,totals';
@@ -772,6 +789,24 @@ const TT_MKTS = 'team_totals';
 const TT_SPORTS = { nba: 1, ncaab: 1, nhl: 1, mlb: 1, wnba: 1 };
 function extraMktsFor(sport) { return TT_SPORTS[sport] ? TT_MKTS : EXTRA_MKTS; }
 const PERIOD_MKTS = { h1: 'h2h_h1,spreads_h1,totals_h1', q1: 'h2h_q1,spreads_q1,totals_q1', p1: 'h2h_p1,spreads_p1,totals_p1', f5: 'h2h_1st_5_innings,spreads_1st_5_innings,totals_1st_5_innings' };
+// (1137) Market keys a game page or price check may ask for. A request is cleaned to these keys (same order,
+// no repeats, at most 16), so nobody can make the server buy markets theboard does not offer. It used to be
+// cut at 240 characters instead, which chopped the 12-market NFL props list (243 characters) in the middle
+// of its last key ("player_pass_rush_"), so the Odds API refused the whole call and NFL showed no props.
+const ALLOWED_MKTS = (() => {
+  const all = [LIVE_CARD_MKTS, EXTRA_MKTS, TT_MKTS, BUY_MKTS, 'h2h,spreads,totals']
+    .concat(Object.keys(PROP_MARKETS).map(k => PROP_MARKETS[k]), Object.keys(PERIOD_MKTS).map(k => PERIOD_MKTS[k]));
+  const set = {};
+  all.join(',').split(',').forEach(k => { if (k) set[k] = 1; });
+  return set;
+})();
+function cleanMkts(raw) {
+  const seen = {}, out = [];
+  String(raw || '').toLowerCase().replace(/[^a-z0-9_,]/g, '').split(',').forEach(k => {
+    if (k && ALLOWED_MKTS[k] && !seen[k] && out.length < 16) { seen[k] = 1; out.push(k); }
+  });
+  return out.join(',');
+}
 const ROT_SPORTS = { nfl: 1, ncaaf: 1, mlb: 1, nba: 1, ncaab: 1, wnba: 1, nhl: 1 };
 const PRE_STALE_MS = 15 * MIN;   // (1130) a pregame team total the book hasn't touched for 15 minutes is suspended: not offered
 const ALT_MIN_PRICE = -200, ALT_MAX_PRICE = 150;   // (1130) alternate lines offered as their own bets: the board's -200 / +150 spread-total limit
