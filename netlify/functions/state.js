@@ -14,6 +14,7 @@ const SEL_FIELDS = ['gid', 'mkt', 'side', 'label', 'odds', 'lockedOdds', 'baseOd
 const USER_FIELDS = ['anchorAt', 'balanceAnchor', 'cashedOut', 'cashedAt', 'cashedAmount', 'opening', 'team'];
 const DEFAULT_SETTINGS = { bettingEnabled: true, minStake: 20, maxStake: 500, minParlayLegs: 2, maxParlayLegs: 6,
   maxParlayFavorites: 3, minParlayStake: 20, disabledSports: [], blockedUsers: [], blockedGames: [] };
+const SPECIAL_MIN = { eg009: 5 };   // (1140) accounts with their own lower minimum per bet
 const NEG_LIMIT = -500;           // same default the page used
 const GAME_OVER_MS = 4 * 3600e3;  // a game that started more than 4h ago is treated as over
 
@@ -180,8 +181,11 @@ function placeBet(st, me, body, ctx, ver) {
   });
   { const m = sameTeamMlSpread(clean); if (m) bad(m); }
   // (1129) the $20 minimum (and the parlay minimum) apply to admins too
-  if (stake < s.minStake) bad('Minimum bet is $' + Number(s.minStake).toFixed(2));
-  if (clean.length >= 2 && stake < s.minParlayStake) bad('Parlay minimum is $' + Number(s.minParlayStake).toFixed(2));
+  // (1140) per-account minimum (by the signed-in account, never by anything the phone sends): eg009 = $5
+  const ownMin = SPECIAL_MIN[String(me.id || '').trim().toLowerCase()];
+  const minS = ownMin || s.minStake, minP = ownMin || s.minParlayStake;
+  if (!(stake >= minS)) bad('Minimum bet is $' + Number(minS).toFixed(2));
+  if (clean.length >= 2 && stake < minP) bad('Parlay minimum is $' + Number(minP).toFixed(2));
   if (!admin) {
     if (!s.bettingEnabled) bad('Betting is temporarily turned off by the admin.');
     if ((s.blockedUsers || []).some(u => B.sameKey(u, me.id))) bad('Your account is currently blocked from placing bets. Contact admin.');
