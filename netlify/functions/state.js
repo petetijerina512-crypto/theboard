@@ -14,7 +14,6 @@ const SEL_FIELDS = ['gid', 'mkt', 'side', 'label', 'odds', 'lockedOdds', 'baseOd
 const USER_FIELDS = ['anchorAt', 'balanceAnchor', 'cashedOut', 'cashedAt', 'cashedAmount', 'opening', 'team'];
 const DEFAULT_SETTINGS = { bettingEnabled: true, minStake: 20, maxStake: 500, minParlayLegs: 2, maxParlayLegs: 6,
   maxParlayFavorites: 3, minParlayStake: 20, disabledSports: [], blockedUsers: [], blockedGames: [] };
-const SPECIAL_MIN = { eg009: 5 };   // (1140) accounts with their own lower minimum per bet
 const NEG_LIMIT = -500;           // same default the page used
 const GAME_OVER_MS = 4 * 3600e3;  // a game that started more than 4h ago is treated as over
 
@@ -142,6 +141,17 @@ function stampVerified(clean, ver) {
     }
   });
 }
+// (1141) A saved final only blocks a bet when it can be true: it was saved by a 1120+ phone (strict team match)
+// and the game has started. An old cached phone once saved Texas Tech 53-25 (the Oct 17 Arizona State score) under
+// the Oct 31 Arizona @ Texas Tech board game; that wrong record blocked a pregame bet at 10:28.
+function resultSaysFinal(st, x, t0, now) {
+  const r = x.gid && st.results && st.results[x.gid];
+  if (!r || !r.final || !r.strict) return false;
+  if (t0 && now < t0) return false;
+  const rd = Date.parse(r.date || '');
+  if (t0 && !isNaN(rd) && Math.abs(rd - t0) > 12 * 3600e3) return false;
+  return true;
+}
 
 // ---------- actions ----------
 function placeBet(st, me, body, ctx, ver) {
@@ -174,18 +184,20 @@ function placeBet(st, me, body, ctx, ver) {
     const sig = [x.gid, x.mkt, x.side, x.mkt === 'prop' ? x.label : ''].join('|');
     if (sigs[sig]) bad('Same pick is on the slip twice.');
     sigs[sig] = 1;
-    const r = x.gid && st.results[x.gid];
-    if (r && r.final) bad('That game is already final: ' + (x.matchup || x.label || ''));
     const t0 = startTime(x);
+    if (resultSaysFinal(st, x, t0, now)) bad('That game is already final: ' + (x.matchup || x.label || ''));
     if (t0 && now > t0 + GAME_OVER_MS) bad('That game is over: ' + (x.matchup || x.label || ''));
   });
   { const m = sameTeamMlSpread(clean); if (m) bad(m); }
   // (1129) the $20 minimum (and the parlay minimum) apply to admins too
-  // (1140) per-account minimum (by the signed-in account, never by anything the phone sends): eg009 = $5
-  const ownMin = SPECIAL_MIN[String(me.id || '').trim().toLowerCase()];
-  const minS = ownMin || s.minStake, minP = ownMin || s.minParlayStake;
-  if (!(stake >= minS)) bad('Minimum bet is $' + Number(minS).toFixed(2));
-  if (clean.length >= 2 && stake < minP) bad('Parlay minimum is $' + Number(minP).toFixed(2));
+  // (1141) an account's own minimum (admin Limits > Min bet, signed-in account only) replaces the global minimums
+  // for straights and parlays. eg009's $5 from 1140 is now the seed of that field (board.js SEED_MIN).
+  { const ovMin = B.limitOverride(st, me.id).minStake;
+    if (ovMin != null) { if (!(stake >= ovMin - 1e-9)) bad('Minimum bet is $' + Number(ovMin).toFixed(2)); }
+    else {
+      if (!(stake >= s.minStake)) bad('Minimum bet is $' + Number(s.minStake).toFixed(2));
+      if (clean.length >= 2 && stake < s.minParlayStake) bad('Parlay minimum is $' + Number(s.minParlayStake).toFixed(2));
+    } }
   if (!admin) {
     if (!s.bettingEnabled) bad('Betting is temporarily turned off by the admin.');
     if ((s.blockedUsers || []).some(u => B.sameKey(u, me.id))) bad('Your account is currently blocked from placing bets. Contact admin.');
@@ -226,9 +238,8 @@ function placeBet(st, me, body, ctx, ver) {
   { const m = gidConflict(clean); if (m) bad(m); }         // (1130) a game id that is not the priced game
   // (1129) re-check with the feed's start time (the phone's start time is never kept for a checked leg)
   clean.forEach(x => {
-    const r = x.gid && st.results[x.gid];
-    if (r && r.final) bad('That game is already final: ' + (x.matchup || x.label || ''));
     const t0 = startTime(x);
+    if (resultSaysFinal(st, x, t0, now)) bad('That game is already final: ' + (x.matchup || x.label || ''));
     if (t0 && now > t0 + GAME_OVER_MS) bad('That game is over: ' + (x.matchup || x.label || ''));
   });
   // (1123) per leg: was the game already under way when this ticket was placed? The server price
@@ -389,14 +400,15 @@ function signOutUser(st, me, body) {
 // (1131) per-account limits, admin only (the handler refuses everyone else before this runs).
 // body: { userId, limits: { maxStake, maxParlay, maxCasino, negLimit } }  blank / null = back to the global default
 //       { userId, reset: true }  = every field back to the global default
-const LIMIT_NAMES = { maxStake: 'Max bet', maxParlay: 'Max parlay bet', maxCasino: 'Max casino bet', negLimit: 'Credit limit' };
+const LIMIT_NAMES = { maxStake: 'Max bet', maxParlay: 'Max parlay bet', maxCasino: 'Max casino bet', negLimit: 'Credit limit', minStake: 'Min bet' };
 function setLimits(st, me, body) {
   const u = B.findUser(st, str(body.userId, 60));
   if (!u) bad('Account not found');
   const s = settingsOf(st), g = B.globalLimits(st);
   const before = B.limitOverride(st, u.id);
   const next = Object.assign({}, before);
-  if (body.reset === true) B.LIMIT_FIELDS.forEach(f => { delete next[f]; });
+  if (B.seedMin(u.id) != null && before.minStake == null) next.minStake = null;   // (1141) keep a cleared seeded Min bet cleared
+  if (body.reset === true) { B.LIMIT_FIELDS.forEach(f => { delete next[f]; }); if (B.seedMin(u.id) != null) next.minStake = null; }
   else {
     const L = body.limits;
     if (!L || typeof L !== 'object' || Array.isArray(L)) bad('Nothing to save');
@@ -404,7 +416,7 @@ function setLimits(st, me, body) {
     B.LIMIT_FIELDS.forEach(f => {
       if (!(f in L)) return;
       const raw = L[f];
-      if (raw === null || raw === '' || raw === undefined) { delete next[f]; return; }
+      if (raw === null || raw === '' || raw === undefined) { if (f === 'minStake' && B.seedMin(u.id) != null) next[f] = null; else delete next[f]; return; }
       if (typeof raw !== 'number' && typeof raw !== 'string') bad(LIMIT_NAMES[f] + ' must be a number');
       const v = Number(raw);
       if (!Number.isFinite(v)) bad(LIMIT_NAMES[f] + ' must be a number');
@@ -417,6 +429,10 @@ function setLimits(st, me, body) {
         if (v < g.casinoMin) bad('Max casino bet must be at least the casino minimum ($' + g.casinoMin + ')');
         if (v > 100000) bad('Max casino bet too large');
         next[f] = v;
+      } else if (f === 'minStake') {
+        if (v < 1) bad('Min bet must be at least $1');
+        if (v > 100000) bad('Min bet too large');
+        next[f] = round2(v);
       } else {
         const min = f === 'maxParlay' ? Number(s.minParlayStake) : Number(s.minStake);
         if (v < min) bad(LIMIT_NAMES[f] + ' cannot be below the $' + min.toFixed(2) + ' minimum');
@@ -425,7 +441,7 @@ function setLimits(st, me, body) {
       }
     });
   }
-  const same = B.LIMIT_FIELDS.every(f => before[f] === next[f]);
+  const same = B.LIMIT_FIELDS.every(f => (before[f] == null ? null : before[f]) === (next[f] == null ? null : next[f]));
   if (same) return Object.assign({ ok: true, unchanged: true, noWrite: true, user: u.id }, B.limitsOf(st, u.id));
   st.limits = st.limits && typeof st.limits === 'object' && !Array.isArray(st.limits) ? st.limits : {};
   Object.keys(st.limits).forEach(k => { if (B.sameKey(k, u.id)) delete st.limits[k]; });
@@ -459,7 +475,16 @@ function saveWeeks(st, me, body) {
 function saveResults(st, me, body) {
   const r = body.results || {};
   let n = 0;
-  Object.keys(r).slice(0, 2000).forEach(k => { if (r[k] && typeof r[k] === 'object') { st.results[k] = r[k]; n++; } });
+  // (1141) only 1120+ strict finals, and never one for a game that has not started yet (old cached phones saved loose matches)
+  const now = Date.now();
+  Object.keys(r).slice(0, 2000).forEach(k => {
+    const v = r[k];
+    if (!v || typeof v !== 'object') return;
+    if (v.final && !v.strict) return;
+    const d = Date.parse(v.date || '');
+    if (v.final && !isNaN(d) && d > now) return;
+    st.results[k] = v; n++;
+  });
   return n ? { ok: true } : { ok: true, noWrite: true };
 }
 function cancelTicket(st, me, body) {
@@ -881,8 +906,9 @@ exports.handler = async (event) => {
           st.users.forEach(u => { if (u && u.id) { const l = B.limitsOf(st, u.id); view.limits[u.id] = { override: l.override, effective: l.effective }; } });
           view.limitDefaults = B.globalLimits(st);
         } else {
-          const e = B.limitsOf(st, me.id).effective;
-          view.myLimits = { maxStake: e.maxStake, maxParlay: e.maxParlay, maxCasino: e.maxCasino, negLimit: e.negLimit };
+          const lm = B.limitsOf(st, me.id), e = lm.effective;
+          view.myLimits = { maxStake: e.maxStake, maxParlay: e.maxParlay, maxCasino: e.maxCasino, negLimit: e.negLimit,
+            minOwn: lm.override.minStake != null ? lm.override.minStake : null };   // (1141) read-only for the player; only adminSetLimits changes it
           view.results = playerResults(st.results, view.bets);   // (1133) only the finals his own tickets can use
         }
         return { noWrite: true };

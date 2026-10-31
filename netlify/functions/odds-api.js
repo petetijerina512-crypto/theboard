@@ -704,7 +704,7 @@ async function runQuery(ctx, key, params, maxAge) {
   }
 
   return (await cached(ctx, 'main:' + sport, mainTtl, maxAge, async () => {
-    const markets = sport === 'tennis' ? 'h2h' : 'h2h,spreads,totals';
+    const markets = sport === 'tennis' ? 'h2h,totals' : 'h2h,spreads,totals';   // (1141) tennis: total games
     const keys = sport === 'tennis' ? await activeTennisKeys(key) : [apiSport];
     const url = 'https://api.the-odds-api.com/v4/sports/' + apiSport + '/odds?regions=us&markets=' + markets + '&oddsFormat=american' + (ROT_SPORTS[sport] ? '&includeRotationNumbers=true' : '') + '&apiKey=' + encodeURIComponent(key);
     try {
@@ -714,7 +714,7 @@ async function runQuery(ctx, key, params, maxAge) {
       if (sport === 'tennis') {
         const chunks = await Promise.all(keys.slice(0, 8).map(async (k) => {
           try {
-            const res = await getJson('https://api.the-odds-api.com/v4/sports/' + k + '/odds?regions=us&markets=h2h&oddsFormat=american&apiKey=' + encodeURIComponent(key));
+            const res = await getJson('https://api.the-odds-api.com/v4/sports/' + k + '/odds?regions=us&markets=h2h,totals&oddsFormat=american&apiKey=' + encodeURIComponent(key));
             const rows = Array.isArray(res.json) ? res.json : [];
             rows.forEach(ev => { ev.tournament = tennisLabel(k); });
             return rows;

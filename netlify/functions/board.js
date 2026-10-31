@@ -254,16 +254,22 @@ function balanceOf(st, userId) {
 // st.limits = { <account id>: { maxStake, maxParlay, maxCasino, negLimit, by, at } }. Admin-only to read and write
 // (state.js adminSetLimits). A field that is missing = that account uses the global default. Kept apart from the
 // user record, so the player's own view (publicUser) never carries it and no other save can change it.
-const LIMIT_FIELDS = ['maxStake', 'maxParlay', 'maxCasino', 'negLimit'];
+const LIMIT_FIELDS = ['maxStake', 'maxParlay', 'maxCasino', 'negLimit', 'minStake'];   // (1141) minStake: per-account minimum bet
 const DEF_NEG = -500, DEF_MAX = 500, DEF_CAS_MIN = 1, DEF_CAS_MAX = 100;
 const num = v => (v === null || v === undefined || v === '' ? NaN : Number(v));
+// (1141) 1140 gave eg009 a $5 minimum in code. It now shows in eg009's Limits > Min bet as $5 until the admin
+// changes or clears it there (a cleared box is saved as minStake: null = the global default).
+const SEED_MIN = { eg009: 5 };
+function seedMin(userId) { const v = SEED_MIN[String(userId || '').trim().toLowerCase()]; return v != null ? v : null; }
 function limitOverride(st, userId) {
   const L = st && st.limits && typeof st.limits === 'object' ? st.limits : null;
   const out = {};
-  if (!L) return out;
+  const seed = seedMin(userId);
+  if (!L) { if (seed != null) out.minStake = seed; return out; }
   const key = Object.keys(L).find(k => sameKey(k, userId));
   const o = key != null && Object.prototype.hasOwnProperty.call(L, key) ? L[key] : null;
-  if (!o || typeof o !== 'object') return out;
+  if (!o || typeof o !== 'object') { if (seed != null) out.minStake = seed; return out; }
+  if (seed != null && !Object.prototype.hasOwnProperty.call(o, 'minStake')) out.minStake = seed;
   LIMIT_FIELDS.forEach(f => { const v = num(o[f]); if (Number.isFinite(v)) out[f] = v; });
   return out;
 }
@@ -274,7 +280,8 @@ function globalLimits(st) {
   const cmin = Math.max(DEF_CAS_MIN, Math.round(Number(cs.min) || DEF_CAS_MIN));
   const cmax = Math.max(cmin, Math.round(Number(cs.max) || DEF_CAS_MAX));
   const maxStake = Number.isFinite(mx) ? mx : DEF_MAX;
-  return { maxStake, maxParlay: maxStake, maxCasino: cmax, negLimit: Number.isFinite(ng) ? ng : DEF_NEG, casinoMin: cmin };
+  const mn = num(s.minStake);
+  return { maxStake, maxParlay: maxStake, maxCasino: cmax, negLimit: Number.isFinite(ng) ? ng : DEF_NEG, casinoMin: cmin, minStake: Number.isFinite(mn) && mn >= 20 ? mn : 20 };
 }
 // what applies to this account: its own override where set, the global default otherwise
 function limitsOf(st, userId) {
@@ -389,5 +396,5 @@ module.exports = {
   hashPassword, verifyPassword, makeToken, readToken, requireUser, findUser, isAdmin,
   ticketNet, computeBalances, balanceOf, viewFor, publicUser, sendAlert,
   reply, fail, parseBody, clientIp, KEY, AUTH_KEY, sameKey,
-  LIMIT_FIELDS, limitOverride, globalLimits, limitsOf, openExposure
+  LIMIT_FIELDS, limitOverride, seedMin, globalLimits, limitsOf, openExposure
 };

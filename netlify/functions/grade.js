@@ -717,6 +717,18 @@ function gradeLeg(bet, s, games, now) {
   if (isProp) return gradeProp(s, g, lg);
   if (isTennis(g.league)) {
     // Book rule: a match that is not completed (retirement, walkover) voids the match-winner bet.
+    if (mkt === 'tot' && !s.period) {
+      // (1141) total games: every game of every set, both players. Only a match that was played out
+      // (STATUS_FINAL) is graded; retirement / walkover waits for the admin.
+      if (!/STATUS_FINAL$/.test(g.statusName)) return { r: null, why: 'tennis total: match ' + g.statusName.replace('STATUS_', '').toLowerCase() + ': grade from the admin screen' };
+      const lh = tHome.lines || [], la = tAway.lines || [];
+      if (!lh.length || lh.length !== la.length || lh.concat(la).some(n => !Number.isFinite(n))) return { r: null, why: 'tennis total: ESPN set scores missing' };
+      const games = lh.concat(la).reduce((x, y) => x + y, 0);
+      const tl = totalLine(s), ou = overUnder(s);
+      if (!tl || tl.line == null || !ou) return { r: null, why: 'tennis total: no line / side' };
+      if (games === tl.line) return { r: 'push', why: 'tennis total games ' + games + ' = line' };
+      return { r: (ou === 'o') === (games > tl.line) ? 'won' : 'lost', why: 'tennis total games ' + games + ' vs ' + tl.line };
+    }
     if (mkt !== 'ml') return { r: null, why: 'tennis market "' + mkt + '" is not auto-graded' };
     const pick = side === 'h' ? tHome : side === 'a' ? tAway : null;
     if (!pick) return { r: null, why: 'tennis pick has no side' };
