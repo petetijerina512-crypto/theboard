@@ -5,7 +5,7 @@
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
   <meta charset="UTF-8" />
-  <meta name="board-build" content="1138" />
+  <meta name="board-build" content="1139" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <title>The Board</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230d1b2a'/%3E%3Ctext x='16' y='23' font-family='Arial' font-weight='700' font-size='19' text-anchor='middle' fill='%23fff'%3EB%3C/text%3E%3C/svg%3E" />
@@ -14,7 +14,7 @@
   <link rel="preload" href="/assets/app.da9640c534.js" as="script">
   <script>
     (window.__boardVersionCheck = function(){
-      var here = '1138';
+      var here = '1139';
       // (1133) only the first 1 KB of the page (the board-build tag near the top), not the whole 540 KB file.
       // A server that ignores Range just sends the whole page, and the ADMIN label still works then.
       fetch('/index.html?fresh=' + Date.now(), { cache: 'no-store', headers: { Range: 'bytes=0-1023' } }).then(function(r){ return r.text(); }).then(function(html){
@@ -24,7 +24,7 @@
       }).catch(function(){});
     })();   // (1136) also run again if a file can't be loaded later (a newer board went up)
     // (1136) an admin's phone also starts downloading the casino + admin files now (players never download them)
-    (function(){ try { var s = JSON.parse(localStorage.getItem('sunbook_session') || 'null'); if (s && s.role === 'admin' && localStorage.getItem('board_auth')) ['/assets/casino.343faf94a9.js', '/assets/admin.b7536d8463.js'].forEach(function (h) { var l = document.createElement('link'); l.rel = 'preload'; l.as = 'script'; l.href = h; document.head.appendChild(l); }); } catch (e) {} })();
+    (function(){ try { var s = JSON.parse(localStorage.getItem('sunbook_session') || 'null'); if (s && s.role === 'admin' && localStorage.getItem('board_auth')) ['/assets/casino.343faf94a9.js', '/assets/admin.241490009f.js'].forEach(function (h) { var l = document.createElement('link'); l.rel = 'preload'; l.as = 'script'; l.href = h; document.head.appendChild(l); }); } catch (e) {} })();
   </script>
   <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Oswald:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/assets/board.187478502f.css">
@@ -323,7 +323,7 @@
     // changes, so a phone never mixes old and new pieces). Players download only the main file; an admin's phone
     // also gets the casino and admin files, and a player the casino is turned on for gets the casino file.
     (function () {
-      var FILES = { app: '/assets/app.da9640c534.js', casino: '/assets/casino.343faf94a9.js', admin: '/assets/admin.b7536d8463.js' };
+      var FILES = { app: '/assets/app.da9640c534.js', casino: '/assets/casino.343faf94a9.js', admin: '/assets/admin.241490009f.js' };
       var NEEDS = { admin: ['casino'] };
       var asked = {};
       function inject(name, attempt) {
