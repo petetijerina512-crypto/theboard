@@ -13,7 +13,8 @@
 //  - every open ticket that is past its game and still open gets a plain reason in
 //    st.grader.waiting, shown to admins, so nothing is silently stuck
 // v1119 (all bets grade automatically where ESPN has the data; see report for the rules):
-//  - tennis (ATP + WTA singles) match winner; retired / walkover = void (push)
+//  - tennis (ATP + WTA singles) match winner; retired / walkover: player who advanced wins, retired / withdrawn player loses (1139)
+// v1139: OWNER RULE (Oct 31 2026): any moneyline tie = LOSS, never push (all sports, parlay legs too)
 //  - UFC / PFL draws and no-contests = void, read from ESPN's fight status (never guessed)
 //  - soccer that went to extra time / penalties: graded on the 90 minutes (+ stoppage) score
 //  - soccer 1st half, team totals, 1st-half totals / team totals
@@ -719,7 +720,13 @@ function gradeLeg(bet, s, games, now) {
     if (mkt !== 'ml') return { r: null, why: 'tennis market "' + mkt + '" is not auto-graded' };
     const pick = side === 'h' ? tHome : side === 'a' ? tAway : null;
     if (!pick) return { r: null, why: 'tennis pick has no side' };
-    if (/RETIRED|WALKOVER|DEFAULT/i.test(g.statusName)) return { r: 'push', why: 'tennis void: match not completed (' + g.statusName.replace('STATUS_', '').toLowerCase() + ')' };
+    if (/RETIRED|WALKOVER|DEFAULT/i.test(g.statusName)) {
+      // OWNER RULE (1139): retirement / walkover: the player who advanced WINS, the one who retired / withdrew LOSES.
+      // Who advanced comes from ESPN's winner flag; with no winner flag the ticket waits for the admin (never guessed).
+      const how = g.statusName.replace('STATUS_', '').toLowerCase();
+      if (!tHome.winner && !tAway.winner) return { r: null, why: 'tennis ' + how + ' but ESPN shows no winner: grade from the admin screen' };
+      return { r: pick.winner ? 'won' : 'lost', why: 'tennis ' + how + ': ' + (pick.winner ? 'pick advanced' : 'pick retired / withdrew') + ' (house rule 1139)' };
+    }
     if (!/STATUS_FINAL$/.test(g.statusName)) return { r: null, why: 'tennis status ' + g.statusName + ': grade from the admin screen' };
     if (!tHome.winner && !tAway.winner) return { r: null, why: 'tennis match final but ESPN shows no winner' };
     return { r: pick.winner ? 'won' : 'lost', why: 'match result' };
@@ -732,7 +739,8 @@ function gradeLeg(bet, s, games, now) {
     // no winner: only a draw or no contest that ESPN states in the fight's own status is voided
     if (!g.fightStatus) return { r: null, why: 'checking ESPN fight result (draw / no contest?)', need: 'fight' };
     const res = String(g.fightStatus.name || g.fightStatus.displayName || '');
-    if (/draw|no.?contest|^nc$/i.test(res)) return { r: 'push', why: 'fight void: ' + res };
+    if (/draw/i.test(res)) return { r: 'lost', why: 'fight draw: house rule (1139), a moneyline loses on a tie' };
+    if (/no.?contest|^nc$/i.test(res)) return { r: 'push', why: 'fight void: ' + res };
     return { r: null, why: 'fight has no winner' + (res ? ' (ESPN result "' + res + '")' : '') + ': grade from the admin screen' };
   }
   let hs = tHome.score, as = tAway.score;
@@ -768,7 +776,7 @@ function gradeLeg(bet, s, games, now) {
       if (!per && TIE_LOSES_ML[g.league]) return { r: 'lost', why: 'tie: house rule, ' + g.league.toUpperCase() + ' moneyline loses on a tie' };
       // OWNER RULE (1130): a 1st half / 1st quarter / 1st period / first-5 moneyline on a tied period is a LOSS (any sport)
       if (per) return { r: 'lost', why: 'tied ' + per + ': house rule, a period moneyline loses on a tie' };
-      return { r: 'push', why: 'tie' };
+      return { r: 'lost', why: 'tie: house rule (1139), a moneyline loses on a tie (any sport)' };
     }
     return { r: (side === 'h' ? hs > as : as > hs) ? 'won' : 'lost', why: 'final ' + as + '-' + hs + (extra ? ' after 90 minutes' : '') };
   }
