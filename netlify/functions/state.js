@@ -153,6 +153,67 @@ function resultSaysFinal(st, x, t0, now) {
   return true;
 }
 
+// ---------- (1143) bet alert text, built from the server-checked legs ----------
+// "KingRigo007 bet $108.00 to win $100.00: Over 220.5 -108 (Los Angeles Clippers @ Golden State Warriors)"
+const ALERT_PER = { h1: '1st Half', h2: '2nd Half', q1: '1st Quarter', q2: '2nd Quarter', q3: '3rd Quarter', q4: '4th Quarter',
+  p1: '1st Period', p2: '2nd Period', p3: '3rd Period', i1: '1st Inning', f3: 'First 3 Innings', f5: 'First 5 Innings', f7: 'First 7 Innings',
+  s1: '1st Set', s2: '2nd Set', sets: 'Set Betting' };
+const ALERT_PROP = { pass_yds: 'Pass Yards', pass_tds: 'Pass TDs', pass_completions: 'Completions', pass_attempts: 'Pass Attempts', pass_interceptions: 'Interceptions Thrown',
+  rush_yds: 'Rush Yards', rush_attempts: 'Rush Attempts', receptions: 'Receptions', reception_yds: 'Receiving Yards', rush_reception_yds: 'Rush + Rec Yards',
+  pass_rush_yds: 'Pass + Rush Yards', anytime_td: 'Anytime TD', reception_tds: 'Receiving TDs', rush_reception_tds: 'Rush + Rec TDs', rush_longest: 'Longest Rush',
+  reception_longest: 'Longest Reception', sacks: 'Sacks', solo_tackles: 'Solo Tackles', tackles_assists: 'Tackles + Assists', field_goals: 'Field Goals',
+  kicking_points: 'Kicking Points', points: 'Points', rebounds: 'Rebounds', assists: 'Assists', threes: 'Threes', points_rebounds_assists: 'Pts + Reb + Ast',
+  points_rebounds: 'Pts + Reb', points_assists: 'Pts + Ast', rebounds_assists: 'Reb + Ast', steals: 'Steals', blocks: 'Blocks', blocks_steals: 'Blocks + Steals',
+  turnovers: 'Turnovers', hits: 'Hits', home_runs: 'Home Runs', rbis: 'RBIs', runs_scored: 'Runs', walks: 'Walks', strikeouts: 'Strikeouts', outs: 'Outs',
+  earned_runs: 'Earned Runs', hits_allowed: 'Hits Allowed', hits_runs_rbis: 'Hits + Runs + RBIs', total_bases: 'Total Bases', goals: 'Goals',
+  shots_on_goal: 'Shots on Goal', total_saves: 'Saves', blocked_shots: 'Blocked Shots', goal_scorer_anytime: 'Anytime Goal' };
+function alertNum(n) { const v = Number(n); return Number.isFinite(v) ? String(v) : ''; }
+function alertSigned(n) { const v = Number(n); return !Number.isFinite(v) ? '' : (v > 0 ? '+' : '') + v; }
+function alertLeg(x) {
+  const mkt = String(x.mkt || 'ml'), side = String(x.side || ''), per = ALERT_PER[String(x.period || '')] || '';
+  const home = String(x.home || ''), away = String(x.away || '');
+  const team = side === 'h' ? home : side === 'a' ? away : '';
+  const tteam = String(x.team || '') === 'h' ? home : String(x.team || '') === 'a' ? away : team;
+  const sp = String(x.sport || '').toLowerCase();
+  const tennis = /^tennis/.test(sp), fight = /^(mma|ufc|pfl|boxing)$/.test(sp);
+  const ou = side === 'o' ? 'Over' : side === 'u' ? 'Under' : '';
+  const tl = x.currentTotal != null ? x.currentTotal : x.verifiedLine;
+  const sl = x.currentSpread != null ? x.currentSpread : x.verifiedLine;
+  const alt = x.alt === true ? ' (alt)' : '';
+  let pick = '';
+  if (mkt === 'ml') pick = team ? team + (per ? ' ' + per : '') + ' ML' : (side === 'd' ? (per ? per + ' ' : '') + 'Draw' : '');
+  else if (mkt === 'sp') {
+    const what = x.period === 'sets' ? 'Sets Handicap' : tennis ? (per ? per + ' Games Spread' : 'Games Spread') : fight ? 'Spread' : (per ? per + ' Spread' : 'Spread');
+    pick = team ? team + ' ' + alertSigned(sl) + ' ' + what + alt : '';
+  } else if (mkt === 'tot') {
+    const what = x.period === 'sets' ? 'Total Sets' : tennis ? (per ? per + ' Total Games' : 'Total Games') : fight ? 'Total Rounds' : per;
+    pick = ou ? (what ? what + ' ' : '') + ou + ' ' + alertNum(tl) + alt : '';
+  } else if (mkt === 'tt') pick = tteam && ou ? tteam + ' Team Total ' + ou + ' ' + alertNum(tl) + alt : '';
+  else if (mkt === 'h1tot') pick = ou ? '1st Half ' + ou + ' ' + alertNum(tl) : '';
+  else if (mkt === 'h1tt') pick = tteam && ou ? tteam + ' 1st Half Team Total ' + ou + ' ' + alertNum(tl) : '';
+  else if (mkt === 'btts') pick = side === 'y' ? 'Both Teams To Score: Yes' : side === 'n' ? 'Both Teams To Score: No' : '';
+  else if (mkt === 'dnb') pick = team ? team + ' Draw No Bet' : '';
+  else if (mkt === 'dc') pick = side === 'hd' ? 'Double Chance: ' + home + ' or Draw' : side === 'ad' ? 'Double Chance: ' + away + ' or Draw' : side === 'ha' ? 'Double Chance: ' + home + ' or ' + away : '';
+  else if (mkt === 'prop') {
+    const key = String(x.propMarket || '').replace(/^(player|batter|pitcher)_/, '');
+    const isAlt = /_alternate$/.test(key), base = key.replace(/_alternate$/, '');
+    const name = ALERT_PROP[base] || base.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    const who = String(x.propPlayer || '');
+    if (side === 'yes') pick = who + ' ' + name + ': Yes';
+    else if (ou && who) pick = who + ' ' + ou + ' ' + alertNum(tl) + ' ' + name + (isAlt ? ' (alt)' : '');
+  }
+  if (!pick) pick = String(x.label || mkt).replace(/\s+/g, ' ').trim();   // futures and anything the server does not name
+  const o = Number(x.verifiedOdds != null ? x.verifiedOdds : x.odds);
+  const matchup = x.verifiedTeams || (home && away ? away + ' @ ' + home : String(x.matchup || ''));
+  return pick + ' ' + alertSigned(o) + (x.liveAtBet ? ' LIVE' : '') + (matchup && pick.indexOf(matchup) < 0 ? ' (' + matchup + ')' : '');
+}
+function betAlert(who, stake, legs) {
+  const dec = legs.reduce((a, x) => { const o = Number(x.verifiedOdds != null ? x.verifiedOdds : x.odds); return a * (o > 0 ? 1 + o / 100 : 1 + 100 / Math.abs(o)); }, 1);
+  const win = Number.isFinite(dec) && dec > 1 ? stake * (dec - 1) : 0;
+  const head = who + ' bet $' + stake.toFixed(2) + (win ? ' to win $' + win.toFixed(2) : '') + (legs.length > 1 ? ' (' + legs.length + '-leg parlay)' : '');
+  return (head + ': ' + legs.map(alertLeg).join(' | ')).slice(0, 1500);
+}
+
 // ---------- actions ----------
 function placeBet(st, me, body, ctx, ver) {
   const admin = B.isAdmin(me);
@@ -258,8 +319,8 @@ function placeBet(st, me, body, ctx, ver) {
   };
   st.bets[userKey].unshift(ticket);
   st.idem[userKey] = [{ k: idem, id, at: now }].concat((st.idem[userKey] || []).filter(x => now - x.at < 7 * 864e5)).slice(0, 100);
-  let msg = str(body.alertText, 450) || (me.id + ' bet $' + stake.toFixed(2) + ': ' + clean.map(x => x.label).join(' | '));
-  if (msg.toLowerCase().indexOf(String(me.id).toLowerCase()) !== 0) msg = me.id + ': ' + msg;
+  // (1143) the alert is written here from the checked legs (feed teams, checked line and price), never the phone's text
+  const msg = betAlert(me.id, stake, clean);
   ctx.after = () => B.sendAlert(msg);
   return { ok: true, ticket, balance: B.balanceOf(st, userKey) };
 }
@@ -970,6 +1031,6 @@ exports.handler = async (event) => {
     return B.reply(200, result);
   } catch (e) { return B.fail(e); }
 };
-exports._test = Object.assign(exports._test || {}, { playerResults, legTimeMs, sameTeamMlSpread, stampVerified, placeBet, SAME_TEAM_MSG, gidConflict, setLimits, settledHistory, ticketDay, chicagoMidnight });
+exports._test = Object.assign(exports._test || {}, { playerResults, legTimeMs, sameTeamMlSpread, stampVerified, placeBet, SAME_TEAM_MSG, gidConflict, setLimits, settledHistory, ticketDay, chicagoMidnight, betAlert, alertLeg });
 
 exports.stateView = stateView;

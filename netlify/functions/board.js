@@ -356,7 +356,7 @@ async function sendAlert(msg) {
       const t = setTimeout(() => ctrl.abort(), 4000);
       const res = await fetch('https://api.telegram.org/bot' + token + '/sendMessage', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chat_id: chat, text: String(msg).slice(0, 500) }), signal: ctrl.signal
+        body: JSON.stringify({ chat_id: chat, text: String(msg).slice(0, 3500) }), signal: ctrl.signal
       });
       clearTimeout(t);
       results.push({ ok: res.ok });
@@ -368,7 +368,7 @@ async function sendAlert(msg) {
     try {
       await fetch('https://api.resend.com/emails', {
         method: 'POST', headers: { Authorization: 'Bearer ' + resendKey, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ from: 'The Board <alerts@theboard.my>', to: [emailTo], subject: 'Bet', text: String(msg).slice(0, 500) })
+        body: JSON.stringify({ from: 'The Board <alerts@theboard.my>', to: [emailTo], subject: 'Bet', text: String(msg).slice(0, 3500) })
       });
     } catch (e) {}
   }
