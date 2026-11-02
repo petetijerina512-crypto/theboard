@@ -46,7 +46,14 @@ exports.handler = async (event) => {
     if (!ok) throw new B.HttpError(401, 'Invalid credentials.');
     await recordLogin(store, user, event);
     const t = B.makeToken(user);
-    return B.reply(200, { token: t.token, exp: t.exp, user: B.publicUser(user) });
+    // (1142) faster sign-in: the board data comes back with the token, read with the new token through the
+    // exact same path as GET /state (same checks, same view). If it fails the phone just asks /state itself.
+    let view = null;
+    try {
+      const ev2 = Object.assign({}, event, { httpMethod: 'GET', body: null, headers: Object.assign({}, event.headers || {}, { authorization: 'Bearer ' + t.token }) });
+      view = await require('./state').stateView(store, ev2);
+    } catch (e) { view = null; }
+    return B.reply(200, { token: t.token, exp: t.exp, user: B.publicUser(user), view });
   } catch (e) { return B.fail(e); }
 };
 

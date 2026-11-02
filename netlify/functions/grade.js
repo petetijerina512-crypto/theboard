@@ -222,6 +222,7 @@ function teamInfo(c) {
     names, keys, label: t.displayName || a.displayName || '',
     score: c.score != null && c.score !== '' ? Number(c.score) : null,
     lines: (c.linescores || []).map(x => Number(x.value != null ? x.value : x.displayValue)),
+    setWon: (c.linescores || []).map(x => x.winner === true ? true : x.winner === false ? false : null),   // (1142) tennis: ESPN's per-set winner flag
     winner: c.winner === true
   };
 }
@@ -332,7 +333,10 @@ function badStatus(g) { return /CANCEL|POSTPON|SUSPEND|DELAY|ABANDON|FORFEIT/i.t
 // here before taking such a bet on a game in progress, and refuses it once ESPN shows the period over.
 const QUARTER_SPORTS = { nfl: 1, ncaaf: 1, cfl: 1, nba: 1, wnba: 1, ncaaw: 1 };
 function periodUnits(lg, per) {
-  if (per === 'game') return Infinity;
+  if (per === 'game' || per === 'h2') return Infinity;   // (1142) 2nd half: open until the game is over
+  if (/^q[234]$/.test(per) || per === 'p2' || per === 'p3') return Number(per[1]);
+  if (per === 'i1') return 1;
+  if (per === 'f3' || per === 'f7') return Number(per[1]);
   if (per === 'q1' || per === 'p1') return 1;
   if (per === 'f5') return 5;
   if (per === 'h1') return QUARTER_SPORTS[lg] ? 2 : 1;   // college basketball and soccer: halves
@@ -348,7 +352,7 @@ function periodOver(lg, per, g) {
   if (n == null) return null;
   if (n === Infinity) return false;
   const name = String(g.statusName || ''), det = String(g.detail || '');
-  if (per !== 'f5' && (/HALFTIME/.test(name) || /^half(time)?\b/i.test(det))) return true;
+  if ((per === 'h1' || per === 'q1' || per === 'q2' || per === 'p1') && (/HALFTIME/.test(name) || /^half(time)?\b/i.test(det))) return true;
   const p = Number(g.period) || 0;
   if (!p) return null;
   if (p > n) return true;
@@ -361,6 +365,7 @@ function _setGateFetch(f) { gateFetch = f; Object.keys(gateMem).forEach(k => del
 // leg: the selection as the phone sent it; feed: the odds feed's row ({ home, away, commence }).
 async function periodGate(lg, per, leg, feed, now) {
   now = now || Date.now();
+  if (isTennis(lg) && (TENNIS_SET_N[per] || per === 'sets')) return tennisGate(per, leg, feed, now);
   if (!LEAGUES[lg] || isTennis(lg) || isFight(lg)) return { unknown: 'league' };
   const start = Date.parse((feed && feed.commence) || leg.commence || '') || now;
   const d = easternYmd(new Date(start)).replace(/-/g, '');
@@ -383,6 +388,130 @@ async function periodGate(lg, per, leg, feed, now) {
     }
   }
   return { unknown: 'game' };
+}
+
+// ---------- (1142) tennis sets ----------
+// A set is over when ESPN flags its winner, a later set has started, or the score is a finished set
+// (6+ games and 2 clear, or 7). setScores -> [[home, away], ...] for the sets ESPN lists.
+const TENNIS_SET_N = { s1: 1, s2: 2 };
+function setDone(h, a, flagH, flagA, later) {
+  if (later) return true;
+  if (flagH === true || flagA === true) return true;
+  if (!Number.isFinite(h) || !Number.isFinite(a)) return false;
+  const hi = Math.max(h, a), lo = Math.min(h, a);
+  return hi === 7 || (hi >= 6 && hi - lo >= 2);
+}
+function tennisSets(tHome, tAway) {
+  const lh = tHome.lines || [], la = tAway.lines || [];
+  const n = Math.min(lh.length, la.length);
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    const fh = (tHome.setWon || [])[i], fa = (tAway.setWon || [])[i];
+    const done = setDone(lh[i], la[i], fh, fa, i < n - 1);
+    const homeWon = fh === true || fa === false ? true : fa === true || fh === false ? false : (lh[i] > la[i]);
+    out.push({ h: lh[i], a: la[i], done, homeWon: done ? homeWon : null });
+  }
+  return out;
+}
+async function tennisGate(per, leg, feed, now) {
+  const start = Date.parse((feed && feed.commence) || leg.commence || '') || now;
+  const d = easternYmd(new Date(start)).replace(/-/g, '');
+  const k = 'tennis:' + d;
+  let hit = gateMem[k];
+  if (!hit || now - hit.at > 15000) {
+    const r = await loadBoards({ tennis_atp: [d], tennis_wta: [d] }, gateFetch, Date.now() + 3500);
+    if (r.games.failedLeagues.size || r.errors.length) return { unknown: 'espn' };
+    hit = gateMem[k] = { at: now, games: r.games };
+  }
+  const bet = { time: new Date(now).toISOString() };
+  const tries = [[leg.home, leg.away], [feed && feed.home, feed && feed.away]];
+  for (const [home, away] of tries) {
+    if (!home || !away) continue;
+    const s = { gid: leg.gid, sport: 'tennis', commence: new Date(start).toISOString() };
+    const h = findGame(bet, s, 'tennis', { home: String(home), away: String(away) }, hit.games);
+    if (h && !h.mismatch) {
+      const g = h.g;
+      if (g.completed || g.state === 'post') return { over: true, g };
+      if (g.state === 'pre') return { over: false, g };
+      if (g.state !== 'in') return { unknown: 'status', g };
+      const sets = tennisSets(g.home, g.away);
+      const n = TENNIS_SET_N[per];
+      if (!n) return { over: false, g };   // set betting: open until the match is over
+      if (sets.length > n) return { over: true, g };
+      if (sets.length < n) return { over: false, g };
+      return { over: !!sets[n - 1].done, g };
+    }
+  }
+  return { unknown: 'game' };
+}
+// Grades one tennis leg that is not a full-match moneyline. -> { r, why } (r null = admin grades it)
+// OWNER RULE (1142): on a retirement / walkover, games spread, total games, set handicap and total sets
+// bets are NOT auto-graded: they go to the admin "Needs you" list. 1st / 2nd set bets are graded normally
+// when that set was finished before the retirement, otherwise they go to the admin too.
+function gradeTennisMarket(s, g, tHome, tAway, mkt, per, side) {
+  const how = /RETIRED|WALKOVER|DEFAULT/i.test(g.statusName) ? g.statusName.replace('STATUS_', '').toLowerCase() : null;
+  if (!how && !/STATUS_FINAL$/.test(g.statusName)) return { r: null, why: 'tennis ' + (per || mkt) + ': match ' + g.statusName.replace('STATUS_', '').toLowerCase() + ': grade from the admin screen' };
+  const lh = tHome.lines || [], la = tAway.lines || [];
+  if (lh.concat(la).some(n => !Number.isFinite(n)) || lh.length !== la.length) return { r: null, why: 'tennis: ESPN set scores missing' };
+  if (!how && !lh.length) return { r: null, why: 'tennis: ESPN set scores missing' };
+  const sets = tennisSets(tHome, tAway);
+  const n = TENNIS_SET_N[per];
+  if (how) {
+    if (!n) return { r: null, why: 'tennis ' + how + ': ' + (per === 'sets' ? 'set betting' : mkt === 'sp' ? 'games spread' : 'total games') + ' on a match not completed: grade from the admin screen (owner rule 1142)' };
+    if (!(sets[n - 1] && sets[n - 1].done)) return { r: null, why: 'tennis ' + how + ' before set ' + n + ' finished: grade from the admin screen (owner rule 1142)' };
+  }
+  const ou = overUnder(s);
+  const pickH = side === 'h', pickA = side === 'a';
+  const res = (diff, why) => ({ r: Math.abs(diff) < 1e-9 ? 'push' : diff > 0 ? 'won' : 'lost', why });
+  if (n) {
+    const st = sets[n - 1];
+    if (!st || !st.done) return { r: null, why: 'tennis set ' + n + ' not finished on ESPN' };
+    if (mkt === 'ml') {
+      if (!pickH && !pickA) return { r: null, why: 'tennis set pick has no side' };
+      return { r: (pickH ? st.homeWon : !st.homeWon) ? 'won' : 'lost', why: 'set ' + n + ' ' + st.a + '-' + st.h };
+    }
+    if (mkt === 'tot') {
+      const tl = totalLine(s);
+      if (!tl || tl.line == null || !ou) return { r: null, why: 'tennis set total: no line / side' };
+      const games = st.h + st.a;
+      return res(ou === 'o' ? games - tl.line : tl.line - games, 'set ' + n + ' games ' + games + ' vs ' + tl.line);
+    }
+    if (mkt === 'sp') {
+      const L = spreadLine(s);
+      if (!L || !Number.isFinite(L.line) || (!pickH && !pickA)) return { r: null, why: 'tennis set spread: no line / side' };
+      return res((pickH ? st.h - st.a : st.a - st.h) + L.line, 'set ' + n + ' ' + st.a + '-' + st.h + ' line ' + L.line);
+    }
+    return { r: null, why: 'tennis set market "' + mkt + '" is not auto-graded' };
+  }
+  if (per === 'sets') {
+    if (!sets.every(x => x.done)) return { r: null, why: 'tennis: a set is not finished on ESPN' };
+    const sh = sets.filter(x => x.homeWon).length, sa = sets.length - sh;
+    if (mkt === 'tot') {
+      const tl = totalLine(s);
+      if (!tl || tl.line == null || !ou) return { r: null, why: 'tennis total sets: no line / side' };
+      return res(ou === 'o' ? sets.length - tl.line : tl.line - sets.length, 'sets played ' + sets.length + ' vs ' + tl.line);
+    }
+    if (mkt === 'sp') {
+      const L = spreadLine(s);
+      if (!L || !Number.isFinite(L.line) || (!pickH && !pickA)) return { r: null, why: 'tennis set handicap: no line / side' };
+      return res((pickH ? sh - sa : sa - sh) + L.line, 'sets ' + sa + '-' + sh + ' line ' + L.line);
+    }
+    return { r: null, why: 'tennis set market "' + mkt + '" is not auto-graded' };
+  }
+  const gh = lh.reduce((x, y) => x + y, 0), ga = la.reduce((x, y) => x + y, 0);
+  if (mkt === 'tot') {
+    const tl = totalLine(s);
+    if (!tl || tl.line == null || !ou) return { r: null, why: 'tennis total: no line / side' };
+    const games = gh + ga;
+    if (games === tl.line) return { r: 'push', why: 'tennis total games ' + games + ' = line' };
+    return { r: (ou === 'o') === (games > tl.line) ? 'won' : 'lost', why: 'tennis total games ' + games + ' vs ' + tl.line };
+  }
+  if (mkt === 'sp') {
+    const L = spreadLine(s);
+    if (!L || !Number.isFinite(L.line) || (!pickH && !pickA)) return { r: null, why: 'tennis games spread: no line / side' };
+    return res((pickH ? gh - ga : ga - gh) + L.line, 'tennis games ' + ga + '-' + gh + ' line ' + L.line);
+  }
+  return { r: null, why: 'tennis market "' + mkt + '" is not auto-graded' };
 }
 
 // ---------- (1130) bet-time check: does the leg's ESPN game id belong to the feed game? ----------
@@ -454,11 +583,26 @@ const PROP_STATS = {
   batter_walks: [['batting'], ['walks']],
   pitcher_outs: [['pitching'], ['@outs']],                                  // from innings pitched, "6.2" = 20 outs
   pitcher_earned_runs: [['pitching'], ['earnedRuns']],
-  pitcher_hits_allowed: [['pitching'], ['hits']]
+  pitcher_hits_allowed: [['pitching'], ['hits']],
+  // (1142) more props (ESPN box-score keys)
+  player_reception_tds: [['receiving'], ['receivingTouchdowns']],
+  player_rush_reception_tds: [['rushing', 'receiving'], ['rushingTouchdowns', 'receivingTouchdowns']],
+  player_rush_longest: [['rushing'], ['longRushing']],
+  player_reception_longest: [['receiving'], ['longReception']],
+  player_sacks: [['defensive'], ['sacks']],
+  player_solo_tackles: [['defensive'], ['soloTackles']],
+  player_tackles_assists: [['defensive'], ['totalTackles']],
+  player_field_goals: [['kicking'], ['fieldGoalsMade']],
+  player_kicking_points: [['kicking'], ['totalKickingPoints']],
+  player_blocks_steals: [[''], ['blocks', 'steals']],
+  batter_hits_runs_rbis: [['batting'], ['hits', 'runs', 'RBIs']],
+  batter_strikeouts: [['batting'], ['strikeouts']],
+  pitcher_walks: [['pitching'], ['walks']],
+  player_goal_scorer_anytime: [['forwards', 'defenses', 'skaters'], ['goals']]
 };
 // (1130) a pitcher / goalie prop where the player never pitched / played goal is void (the book rule),
 // whatever else ESPN lists him for
-const ROLE_GROUP = { pitcher_strikeouts: 'pitching', pitcher_outs: 'pitching', pitcher_earned_runs: 'pitching', pitcher_hits_allowed: 'pitching', player_total_saves: 'goalies' };
+const ROLE_GROUP = { pitcher_walks: 'pitching', pitcher_strikeouts: 'pitching', pitcher_outs: 'pitching', pitcher_earned_runs: 'pitching', pitcher_hits_allowed: 'pitching', player_total_saves: 'goalies' };
 // innings pitched -> outs ("6.2" = 6 innings + 2 outs = 20). Anything else is not read.
 function outsValue(keys, stats) {
   const i = keys.indexOf('fullInnings.partInnings');
@@ -544,7 +688,7 @@ function propStat(summary, player, market, league) {
 function gradeProp(s, g, lg) {
   if (!g.summary) return { r: null, why: 'loading ESPN box score', need: 'summary' };
   if (g.summary.failed) return { r: null, why: 'ESPN box score could not be loaded (will retry)' };
-  const market = String(s.propMarket || '');
+  const market = String(s.propMarket || '').replace(/_alternate$/, '');   // (1142) alternate props grade on the same stat
   const ps = propStat(g.summary, s.propPlayer || '', market, g.league);
   if (ps.missing) return { r: null, why: 'prop: ' + ps.missing };
   if (ps.dnp) return { r: 'push', why: 'prop void: ' + s.propPlayer + ' did not play' };
@@ -672,6 +816,29 @@ function gradeFutures(bet, s, champs, now) {
 }
 
 // regulation (two halves) or first-half score for soccer, from the ESPN game summary
+// (1142) which ESPN line scores make up each newer period. toEnd: through overtime (2nd half).
+const PERIOD_SLICE = { h2: 1, q2: 1, q3: 1, q4: 1, p2: 1, p3: 1, i1: 1, f3: 1, f7: 1 };
+function periodSliceFor(per, lg) {
+  const path = LEAGUES[lg] || '';
+  const quarters = /football|nba|wnba|womens-college-basketball/.test(path);
+  if (per === 'h2') {
+    if (/basketball|football/.test(path)) return { from: quarters ? 2 : 1, toEnd: true };
+    return { why: '"2nd half" bet in this sport: grade from the admin screen' };
+  }
+  if (/^q[234]$/.test(per)) {
+    if (!quarters || /college-basketball/.test(path) && !/womens/.test(path)) return { why: 'quarter bet outside a quarters sport: grade from the admin screen' };
+    const n = Number(per[1]); return per === 'q4' ? { from: 3, toEnd: true } : { from: n - 1, to: n };   // 4th quarter includes overtime (US book rule)
+  }
+  if (per === 'p2' || per === 'p3') {
+    if (!/hockey/.test(path)) return { why: 'period bet outside hockey: grade from the admin screen' };
+    const n = Number(per[1]); return { from: n - 1, to: n };
+  }
+  if (per === 'i1' || per === 'f3' || per === 'f7') {
+    if (!/baseball/.test(path)) return { why: 'innings bet outside baseball: grade from the admin screen' };
+    return { from: 0, to: per === 'i1' ? 1 : Number(per[1]) };
+  }
+  return { why: 'period "' + per + '": grade from the admin screen' };
+}
 function soccerScore(g, tHome, halves) {
   const comp = g.summary && g.summary.header && (g.summary.header.competitions || [])[0];
   const cs = (comp && comp.competitors) || [];
@@ -693,7 +860,7 @@ function gradeLeg(bet, s, games, now) {
   const isProp = mkt === 'prop' || !!s.propPlayer;
   if (NOT_AUTO[lg]) return { r: null, why: NOT_AUTO[lg] + ': grade from the admin screen' };
   if (lg && !LEAGUES[lg] && !GROUPS[lg]) return { r: null, why: 'league "' + lg + '" is not auto-graded: grade from the admin screen' };
-  if (!isProp && ['ml', 'sp', 'tot', 'tt', 'h1tot', 'h1tt'].indexOf(mkt) < 0) return { r: null, why: 'market "' + mkt + '" is not auto-graded' };
+  if (!isProp && ['ml', 'sp', 'tot', 'tt', 'h1tot', 'h1tt', 'btts', 'dc', 'dnb'].indexOf(mkt) < 0) return { r: null, why: 'market "' + mkt + '" is not auto-graded' };
   // 1st-half game total / team total markets are 1st-half bets whatever the label says
   const per = (mkt === 'h1tot' || mkt === 'h1tt') ? 'h1' : per0;
   const teams = teamsOf(s);
@@ -717,17 +884,10 @@ function gradeLeg(bet, s, games, now) {
   if (isProp) return gradeProp(s, g, lg);
   if (isTennis(g.league)) {
     // Book rule: a match that is not completed (retirement, walkover) voids the match-winner bet.
-    if (mkt === 'tot' && !s.period) {
-      // (1141) total games: every game of every set, both players. Only a match that was played out
-      // (STATUS_FINAL) is graded; retirement / walkover waits for the admin.
-      if (!/STATUS_FINAL$/.test(g.statusName)) return { r: null, why: 'tennis total: match ' + g.statusName.replace('STATUS_', '').toLowerCase() + ': grade from the admin screen' };
-      const lh = tHome.lines || [], la = tAway.lines || [];
-      if (!lh.length || lh.length !== la.length || lh.concat(la).some(n => !Number.isFinite(n))) return { r: null, why: 'tennis total: ESPN set scores missing' };
-      const games = lh.concat(la).reduce((x, y) => x + y, 0);
-      const tl = totalLine(s), ou = overUnder(s);
-      if (!tl || tl.line == null || !ou) return { r: null, why: 'tennis total: no line / side' };
-      if (games === tl.line) return { r: 'push', why: 'tennis total games ' + games + ' = line' };
-      return { r: (ou === 'o') === (games > tl.line) ? 'won' : 'lost', why: 'tennis total games ' + games + ' vs ' + tl.line };
+    // (1141) total games, (1142) games spread, 1st / 2nd set and set betting
+    if (mkt !== 'ml' || per) {
+      if (per && !TENNIS_SET_N[per] && per !== 'sets') return { r: null, why: 'tennis "' + per + '" bet: grade from the admin screen' };
+      return gradeTennisMarket(s, g, tHome, tAway, mkt, per, side);
     }
     if (mkt !== 'ml') return { r: null, why: 'tennis market "' + mkt + '" is not auto-graded' };
     const pick = side === 'h' ? tHome : side === 'a' ? tAway : null;
@@ -760,11 +920,26 @@ function gradeLeg(bet, s, games, now) {
   const extra = soccer && /AET|PEN|EXTRA|SHOOTOUT/i.test(g.statusName);
   if (soccer && (extra || per)) {
     // Book rule: soccer bets are settled on 90 minutes plus stoppage time (no extra time, no penalties).
-    if (per && per !== 'h1') return { r: null, why: 'soccer ' + per + ' bet: grade from the admin screen' };
+    if (per && per !== 'h1' && per !== 'h2') return { r: null, why: 'soccer ' + per + ' bet: grade from the admin screen' };
     if (!g.summary) return { r: null, why: 'loading ESPN regulation score', need: 'summary' };
     const sc = soccerScore(g, tHome, per === 'h1' ? 1 : 2);
     if (!sc) return { r: null, why: 'ESPN has no ' + (per === 'h1' ? '1st-half' : 'regulation') + ' score for this soccer game' };
     hs = sc.hs; as = sc.as;
+    if (per === 'h2') {   // (1142) 2nd half = 90 minutes minus the 1st half
+      const h1 = soccerScore(g, tHome, 1);
+      if (!h1) return { r: null, why: 'ESPN has no 1st-half score for this soccer game' };
+      hs -= h1.hs; as -= h1.as;
+    }
+  } else if (per && PERIOD_SLICE[per]) {
+    // (1142) 2nd half, quarters 2-4, hockey periods 2-3, baseball 1st inning / first 3 / first 7
+    const sl = periodSliceFor(per, g.league);
+    if (sl.why) return { r: null, why: sl.why };
+    const lh = tHome.lines || [], la = tAway.lines || [];
+    if (sl.toEnd ? (lh.length <= sl.from || la.length <= sl.from) : (lh.length < sl.to || la.length < sl.to)) return { r: null, why: 'no period scores yet for ' + per };
+    const pick = l => (sl.toEnd ? l.slice(sl.from) : l.slice(sl.from, sl.to));
+    if (pick(lh).concat(pick(la)).some(n => !Number.isFinite(n))) return { r: null, why: 'ESPN period scores missing for ' + per };
+    hs = pick(lh).reduce((x, y) => x + y, 0);
+    as = pick(la).reduce((x, y) => x + y, 0);
   } else if (per) {
     // (1128) women's college basketball plays quarters; men's college plays halves (no 1st quarter)
     if (per === 'h1' && g.league === 'ncaaw') return { r: null, why: "women's college basketball 1st half: grade from the admin screen" };
@@ -778,6 +953,23 @@ function gradeLeg(bet, s, games, now) {
     as = tAway.lines.slice(0, n).reduce((x, y) => x + y, 0);
   }
   if (!Number.isFinite(hs) || !Number.isFinite(as)) return { r: null, why: 'ESPN has no score' };
+  // (1142) soccer both teams to score / double chance / draw no bet (90 minutes, full match only)
+  if (mkt === 'btts' || mkt === 'dc' || mkt === 'dnb') {
+    if (!soccer || per) return { r: null, why: mkt + ' outside full-match soccer: grade from the admin screen' };
+    if (mkt === 'btts') {
+      if (side !== 'y' && side !== 'n') return { r: null, why: 'BTTS pick has no yes / no' };
+      const both = hs > 0 && as > 0;
+      return { r: (side === 'y') === both ? 'won' : 'lost', why: 'both teams to score: ' + as + '-' + hs };
+    }
+    if (mkt === 'dc') {
+      const res = hs > as ? 'h' : as > hs ? 'a' : 'd';
+      if (['hd', 'ad', 'ha'].indexOf(side) < 0) return { r: null, why: 'double chance pick has no side' };
+      return { r: side.indexOf(res) >= 0 ? 'won' : 'lost', why: 'double chance ' + as + '-' + hs };
+    }
+    if (side !== 'h' && side !== 'a') return { r: null, why: 'draw no bet pick has no side' };
+    if (hs === as) return { r: 'push', why: 'draw no bet: draw ' + as + '-' + hs + ', stake back' };
+    return { r: (side === 'h' ? hs > as : as > hs) ? 'won' : 'lost', why: 'draw no bet ' + as + '-' + hs };
+  }
   if (mkt === 'ml') {
     if (side === 'd' || /\bdraw\b/i.test(String(s.label || '').split('·').pop())) return { r: hs === as ? 'won' : 'lost', why: 'draw pick' };
     if (side !== 'h' && side !== 'a') return { r: null, why: 'moneyline pick has no side' };

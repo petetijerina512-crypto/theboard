@@ -173,7 +173,7 @@ function placeBet(st, me, body, ctx, ver) {
   if (stake > 100000) bad('Stake too large');
   const clean = sels.map(x => cleanSel(x || {}));
   // (1130) "alt" only ever means true (an alternate line taken as its own bet, full game spread / total)
-  clean.forEach(x => { if (x.alt !== true || x.period || (x.mkt !== 'sp' && x.mkt !== 'tot')) delete x.alt; });
+  clean.forEach(x => { if (x.alt !== true || x.period || (x.mkt !== 'sp' && x.mkt !== 'tot' && x.mkt !== 'tt')) delete x.alt; });
   const now = Date.now();
   const sigs = {};
   clean.forEach(x => {
@@ -886,40 +886,43 @@ const ADMIN_ACTIONS = {
   adminSettledHistory: settledHistory   // (1132) read only
 };
 
+// (1142) what GET returns, also handed back by login.js with the token (one round trip at sign-in instead of two)
+async function stateView(store, event) {
+    let view, me;
+    await B.mutate(store, st => {
+      me = B.requireUser(st, event); view = B.viewFor(st, me);
+      // (1121) cash outs: admins see all, a player sees his own (for the "Cashed out" mark on his calendar)
+      view.cashouts = (Array.isArray(st.cashouts) ? st.cashouts : []).filter(c => B.isAdmin(me) || B.sameKey(c.user, me.id)).map(publicCashout);
+      // (1129) casino: may this account open it? (the casino function checks the same list on every call)
+      const allow = (st.casinoSettings && Array.isArray(st.casinoSettings.allowUsers) ? st.casinoSettings.allowUsers : []).map(x => String(x));
+      view.casinoAccess = B.isAdmin(me) || allow.some(x => B.sameKey(x, me.id));
+      if (B.isAdmin(me)) view.casinoAllow = allow;
+      // (1131) per-account limits: admins get every account's own limits + what applies; a player only what applies to him
+      if (B.isAdmin(me)) {
+        view.limits = {};
+        st.users.forEach(u => { if (u && u.id) { const l = B.limitsOf(st, u.id); view.limits[u.id] = { override: l.override, effective: l.effective }; } });
+        view.limitDefaults = B.globalLimits(st);
+      } else {
+        const lm = B.limitsOf(st, me.id), e = lm.effective;
+        view.myLimits = { maxStake: e.maxStake, maxParlay: e.maxParlay, maxCasino: e.maxCasino, negLimit: e.negLimit,
+          minOwn: lm.override.minStake != null ? lm.override.minStake : null };   // (1141) read-only for the player; only adminSetLimits changes it
+        view.results = playerResults(st.results, view.bets);   // (1133) only the finals his own tickets can use
+      }
+      return { noWrite: true };
+    });
+    await markSeen(store, me, event);
+    if (B.isAdmin(me)) {
+      try { const { data } = await B.readKey(store, LOGINS_KEY); view.logins = { last: (data && data.last) || {}, recent: ((data && data.recent) || []).slice(0, 40) }; }
+      catch (e) { view.logins = { last: {}, recent: [] }; }
+    }
+  return view;
+}
+
 exports.handler = async (event) => {
   if (event.httpMethod === 'OPTIONS') return { statusCode: 204, headers: {}, body: '' };
   try {
     const store = await B.getStore(event);
-    if (event.httpMethod === 'GET') {
-      let view, me;
-      await B.mutate(store, st => {
-        me = B.requireUser(st, event); view = B.viewFor(st, me);
-        // (1121) cash outs: admins see all, a player sees his own (for the "Cashed out" mark on his calendar)
-        view.cashouts = (Array.isArray(st.cashouts) ? st.cashouts : []).filter(c => B.isAdmin(me) || B.sameKey(c.user, me.id)).map(publicCashout);
-        // (1129) casino: may this account open it? (the casino function checks the same list on every call)
-        const allow = (st.casinoSettings && Array.isArray(st.casinoSettings.allowUsers) ? st.casinoSettings.allowUsers : []).map(x => String(x));
-        view.casinoAccess = B.isAdmin(me) || allow.some(x => B.sameKey(x, me.id));
-        if (B.isAdmin(me)) view.casinoAllow = allow;
-        // (1131) per-account limits: admins get every account's own limits + what applies; a player only what applies to him
-        if (B.isAdmin(me)) {
-          view.limits = {};
-          st.users.forEach(u => { if (u && u.id) { const l = B.limitsOf(st, u.id); view.limits[u.id] = { override: l.override, effective: l.effective }; } });
-          view.limitDefaults = B.globalLimits(st);
-        } else {
-          const lm = B.limitsOf(st, me.id), e = lm.effective;
-          view.myLimits = { maxStake: e.maxStake, maxParlay: e.maxParlay, maxCasino: e.maxCasino, negLimit: e.negLimit,
-            minOwn: lm.override.minStake != null ? lm.override.minStake : null };   // (1141) read-only for the player; only adminSetLimits changes it
-          view.results = playerResults(st.results, view.bets);   // (1133) only the finals his own tickets can use
-        }
-        return { noWrite: true };
-      });
-      await markSeen(store, me, event);
-      if (B.isAdmin(me)) {
-        try { const { data } = await B.readKey(store, LOGINS_KEY); view.logins = { last: (data && data.last) || {}, recent: ((data && data.recent) || []).slice(0, 40) }; }
-        catch (e) { view.logins = { last: {}, recent: [] }; }
-      }
-      return B.reply(200, view);
-    }
+    if (event.httpMethod === 'GET') return B.reply(200, await stateView(store, event));
     if (event.httpMethod !== 'POST') return B.reply(405, { error: 'method' });
     const body = B.parseBody(event);
     const action = String(body.action || '');
@@ -968,3 +971,5 @@ exports.handler = async (event) => {
   } catch (e) { return B.fail(e); }
 };
 exports._test = Object.assign(exports._test || {}, { playerResults, legTimeMs, sameTeamMlSpread, stampVerified, placeBet, SAME_TEAM_MSG, gidConflict, setLimits, settledHistory, ticketDay, chicagoMidnight });
+
+exports.stateView = stateView;

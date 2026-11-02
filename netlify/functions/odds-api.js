@@ -221,8 +221,28 @@ function normalizeProps(event) {
     if (!m || !m.key || taken[m.key]) return;
     taken[m.key] = 1; mkts.push(m);
   }));
+  Object.assign(labels, { player_reception_tds: 'Rec TDs', player_rush_reception_tds: 'Rush+Rec TDs', player_rush_longest: 'Longest Rush', player_reception_longest: 'Longest Rec',
+    player_sacks: 'Sacks', player_solo_tackles: 'Solo Tackles', player_tackles_assists: 'Tackles+Ast', player_field_goals: 'Field Goals', player_kicking_points: 'Kicking Pts',
+    player_blocks_steals: 'Blk+Stl', batter_hits_runs_rbis: 'H+R+RBI', batter_strikeouts: 'Batter Ks', pitcher_walks: 'Walks Allowed', player_goal_scorer_anytime: 'Anytime Goal' });   // (1142)
   mkts.forEach(m => {
-    if (!m || !m.key || m.key.indexOf('alternate') >= 0) return;
+    if (!m || !m.key) return;
+    // (1142) alternate (milestone) props: one entry per player AND line, so each line is its own bet
+    const alt = /_alternate$/.test(m.key);
+    if (alt) {
+      const base = m.key.replace(/_alternate$/, '');
+      if (!labels[base]) return;
+      const recs = {};
+      (m.outcomes || []).forEach(o => {
+        const player = String(o.description || '').trim();
+        if (!player || o.point == null || o.price == null) return;
+        const kk = player + '|' + o.point;
+        const rec = recs[kk] || (recs[kk] = { player, market: m.key, label: labels[base] + ' (alt)', line: Number(o.point), over: null, under: null, yes: null, alt: true });
+        if (/^over$/i.test(o.name)) rec.over = Number(o.price); else if (/^under$/i.test(o.name)) rec.under = Number(o.price);
+      });
+      Object.keys(recs).forEach(kk => out.push(recs[kk]));
+      return;
+    }
+    if (m.key.indexOf('alternate') >= 0) return;
     if (!labels[m.key]) return;
     const byPlayer = {};
     (m.outcomes || []).forEach(o => {
@@ -246,11 +266,15 @@ function normalizePeriod(sport, events, period) {
     h1: ['spreads_h1', 'totals_h1', 'h2h_h1'],
     q1: ['spreads_q1', 'totals_q1', 'h2h_q1'],
     p1: ['spreads_p1', 'totals_p1', 'h2h_p1'],
-    f5: ['spreads_1st_5_innings', 'totals_1st_5_innings', 'h2h_1st_5_innings']
+    f5: ['spreads_1st_5_innings', 'totals_1st_5_innings', 'h2h_1st_5_innings'],
+    s1: ['spreads_s1', 'totals_s1', 'h2h_s1'],   // (1142) tennis 1st set
+    s2: ['spreads_s2', 'totals_s2', 'h2h_s2']    // (1142) tennis 2nd set (the feed lists the winner only)
   }[period] || ['spreads_h1', 'totals_h1', 'h2h_h1'];
-  const sprKey = keys[0];
-  const totKey = keys[1];
-  const mlKey = keys[2];   // (1130) period moneyline (a tied period grades as a loss: house rule)
+  // (1142) any other period: its keys from PERIOD_MKTS (2nd half, quarters 2-4, periods 2-3, innings)
+  const pk = String(PERIOD_MKTS[period] || '').split(',');
+  const sprKey = ({ h1: 1, q1: 1, p1: 1, f5: 1, s1: 1, s2: 1 }[period] ? keys[0] : (pk.find(x => /^spreads_/.test(x)) || keys[0]));
+  const totKey = ({ h1: 1, q1: 1, p1: 1, f5: 1, s1: 1, s2: 1 }[period] ? keys[1] : (pk.find(x => /^totals_/.test(x)) || keys[1]));
+  const mlKey = ({ h1: 1, q1: 1, p1: 1, f5: 1, s1: 1, s2: 1 }[period] ? keys[2] : (pk.find(x => /^h2h_/.test(x)) || keys[2]));   // (1130) period moneyline (a tied period grades as a loss: house rule)
   return (events || []).map(ev => {
     // (1137) each period market (spread, total, moneyline) from the first book in order that posts it,
     // instead of everything from DraftKings only (a 1st-half spread FanDuel had was lost when DraftKings had none).
@@ -290,6 +314,90 @@ function normalizePeriod(sport, events, period) {
   }).filter(g => g.spread != null || g.total != null || g.mlH != null || g.mlA != null);
 }
 
+
+// (1142) tennis set betting: the feed lists every set handicap / total sets line (alternate_set_*).
+// The board offers one line of each: the handicap pair (same point, opposite signs) and the total
+// whose two prices are closest to even, from the first book in board order that posts it.
+function normalizeSets(sport, events) {
+  const evenness = (a, b) => { const p = x => x < 0 ? -x / (-x + 100) : 100 / (x + 100); return Math.abs(p(a) - 0.5) + Math.abs(p(b) - 0.5); };
+  return (events || []).map(ev => {
+    const order = booksInOrder(ev);
+    const bookFor = k => order.find(b => (b.markets || []).some(x => x.key === k && (x.outcomes || []).length)) || null;
+    const bSp = bookFor('alternate_set_spreads'), bTot = bookFor('alternate_set_totals');
+    const home = ev.home_team, away = ev.away_team;
+    let sp = null, tot = null;
+    if (bSp) {
+      const outs = marketMap(bSp).alternate_set_spreads || [];
+      outs.filter(o => o.name === home && o.point != null && o.price != null).forEach(h => {
+        const a = outs.find(o => o.name === away && o.point != null && Number(o.point) === -Number(h.point) && o.price != null);
+        if (!a) return;
+        const sc = evenness(Number(h.price), Number(a.price));
+        if (!sp || sc < sp.sc) sp = { sc, spread: Number(h.point), spH: Number(h.price), spA: Number(a.price) };
+      });
+    }
+    if (bTot) {
+      const outs = marketMap(bTot).alternate_set_totals || [];
+      outs.filter(o => /^over$/i.test(o.name) && o.point != null && o.price != null).forEach(ov => {
+        const un = outs.find(o => /^under$/i.test(o.name) && Number(o.point) === Number(ov.point) && o.price != null);
+        if (!un) return;
+        const sc = evenness(Number(ov.price), Number(un.price));
+        if (!tot || sc < tot.sc) tot = { sc, total: Number(ov.point), totO: Number(ov.price), totU: Number(un.price) };
+      });
+    }
+    return {
+      sport, id: ev.id, home, away, commence: ev.commence_time, period: 'sets',
+      spread: sp ? sp.spread : null, spH: sp ? sp.spH : null, spA: sp ? sp.spA : null,
+      total: tot ? tot.total : null, totO: tot ? tot.totO : null, totU: tot ? tot.totU : null,
+      mlH: null, mlA: null,
+      spUpd: marketUpd(bSp, 'alternate_set_spreads'), totUpd: marketUpd(bTot, 'alternate_set_totals'), mlUpd: null,
+      book: (bSp || bTot || pickBook(ev) || {}).key || null
+    };
+  }).filter(g => g.spread != null || g.total != null);
+}
+
+// (1142) soccer extras: both teams to score (y / n), double chance (hd = home or draw, ad = away or draw,
+// ha = home or away), draw no bet (h / a). Each market from the first book in board order that posts it.
+function normalizeSoccerX(ev) {
+  const order = booksInOrder(ev);
+  const bookFor = k => order.find(b => (b.markets || []).some(x => x.key === k && (x.outcomes || []).length)) || null;
+  const home = String(ev.home_team || ''), away = String(ev.away_team || '');
+  const has = (name, t) => String(name || '').toLowerCase().indexOf(t.toLowerCase()) >= 0;
+  const out = {};
+  const b1 = bookFor('btts');
+  if (b1) { const o = marketMap(b1).btts || []; const y = o.find(x => /^yes$/i.test(x.name)), n = o.find(x => /^no$/i.test(x.name)); out.btts = { y: y ? Number(y.price) : null, n: n ? Number(n.price) : null, upd: marketUpd(b1, 'btts'), book: b1.key }; }
+  const b2 = bookFor('double_chance');
+  if (b2) {
+    const o = marketMap(b2).double_chance || []; const dc = { hd: null, ad: null, ha: null, upd: marketUpd(b2, 'double_chance'), book: b2.key };
+    const lc = v => String(v || '').trim().toLowerCase();
+    o.forEach(x => {
+      // "Arsenal or Draw" / "Draw or Chelsea" / "Arsenal or Chelsea": exact names first (one team name can sit inside another)
+      const parts = String(x.name || '').split(/\s+or\s+|\s*\/\s*/i).map(lc);
+      const exact = parts.length === 2 && parts.every(q => q === lc(home) || q === lc(away) || /^(draw|tie|x)$/.test(q));
+      const d = exact ? parts.some(q => /^(draw|tie|x)$/.test(q)) : /draw|tie/i.test(x.name);
+      const h = exact ? parts.indexOf(lc(home)) >= 0 : has(x.name, home), a = exact ? parts.indexOf(lc(away)) >= 0 : has(x.name, away);
+      if (h && d && !a) dc.hd = Number(x.price); else if (a && d && !h) dc.ad = Number(x.price); else if (h && a && !d) dc.ha = Number(x.price);
+    });
+    out.dc = dc;
+  }
+  const b3 = bookFor('draw_no_bet');
+  if (b3) { const o = marketMap(b3).draw_no_bet || []; out.dnb = { h: priceFor(o, home), a: priceFor(o, away), upd: marketUpd(b3, 'draw_no_bet'), book: b3.key }; }
+  return (out.btts || out.dc || out.dnb) ? out : null;
+}
+// (1142) alternate team totals: every line each team has, from the board's book (pickBook)
+function normalizeAltTT(ev) {
+  const book = pickBook(ev);
+  const o = book ? (marketMap(book).alternate_team_totals || []) : [];
+  const lad = { h: {}, a: {} };
+  o.forEach(x => {
+    const t = String(x.description || '') === ev.home_team ? 'h' : String(x.description || '') === ev.away_team ? 'a' : null;
+    if (!t || x.point == null || x.price == null) return;
+    const r = lad[t][x.point] || (lad[t][x.point] = { point: Number(x.point), over: null, under: null });
+    if (/^over$/i.test(x.name)) r.over = Number(x.price); else if (/^under$/i.test(x.name)) r.under = Number(x.price);
+  });
+  const list = t => Object.keys(lad[t]).map(k => lad[t][k]).sort((x, y) => x.point - y.point);
+  const res = { h: list('h'), a: list('a'), upd: marketUpd(book, 'alternate_team_totals'), book: book ? book.key : null };
+  return res.h.length || res.a.length ? res : null;
+}
 
 function normalizeLiveAlts(ev) {
   const book = pickBook(ev);
@@ -361,7 +469,11 @@ function normalize(sport, events) {
     const book = pickBook(ev);
     const mk = book ? marketMap(book) : {};
     const h2h = mk.h2h || [];
-    const spr = mk.spreads || [];
+    // (1142) tennis: the game handicap from the first book (in board order) that posts one; DraftKings
+    // often has only the moneyline for a tennis match while Bovada / BetRivers post games spreads
+    let sprBook = book;
+    if (sport === 'tennis' && !((mk.spreads || []).length)) sprBook = booksInOrder(ev).find(b => (b.markets || []).some(x => x.key === 'spreads' && (x.outcomes || []).length)) || book;
+    const spr = sprBook ? (marketMap(sprBook).spreads || []) : [];
     const totPick = fullGameTotals(ev, sport);
     const home = ev.home_team;
     const away = ev.away_team;
@@ -373,6 +485,7 @@ function normalize(sport, events) {
       home,
       away,
       tournament: ev.tournament || '',
+      skey: sport === 'tennis' ? String(ev.sport_key || '') : undefined,   // (1142) the tournament's feed key (tennis event calls need it)
       commence: ev.commence_time,
       mlH: priceFor(h2h, home),
       mlA: priceFor(h2h, away),
@@ -383,6 +496,7 @@ function normalize(sport, events) {
       totO: totPick && totPick.totO != null ? Number(totPick.totO) : null,
       totU: totPick && totPick.totU != null ? Number(totPick.totU) : null,
       totBook: totPick ? totPick.book : null,
+      spBook: sport === 'tennis' && sprBook ? sprBook.key : undefined,
       rotH: ev.home_rotation != null ? Number(ev.home_rotation) : null,   // (1130) rotation numbers (free with the same call)
       rotA: ev.away_rotation != null ? Number(ev.away_rotation) : null,
       book: book ? book.key : null
@@ -583,7 +697,10 @@ function mainTtl(json) {
   return live ? TTL.live : soon ? TTL.today : TTL.later;
 }
 function periodOfMkts(mkts) {
-  const m = /(?:^|,)spreads_(h1|q1|p1|1st_5_innings)(?:,|$)/.exec(String(mkts || ''));
+  const s = String(mkts || '');
+  const exact = Object.keys(PERIOD_MKTS).find(k => PERIOD_MKTS[k] === s);   // (1142) every period by its exact market list
+  if (exact) return exact;
+  const m = /(?:^|,)spreads_(h1|q1|p1|1st_5_innings)(?:,|$)/.exec(s);
   return m ? (m[1] === '1st_5_innings' ? 'f5' : m[1]) : null;
 }
 function eventTtl(mkts, json) {
@@ -642,22 +759,41 @@ async function runQuery(ctx, key, params, maxAge) {
     const evKey = 'ev:' + sport + ':' + eventId + ':' + extraMkts;
     return (await cached(ctx, evKey, j => eventTtl(extraMkts, j), maxAge, async () => {
       const mktQs = extraMkts ? extraMkts : 'h2h,spreads,totals';
-      const evUrl = 'https://api.the-odds-api.com/v4/sports/' + apiSport + '/events/' + encodeURIComponent(eventId) + '/odds?regions=us&markets=' + mktQs + '&oddsFormat=american&apiKey=' + encodeURIComponent(key);
+      const evUrl = k => 'https://api.the-odds-api.com/v4/sports/' + k + '/events/' + encodeURIComponent(eventId) + '/odds?regions=us&markets=' + mktQs + '&oddsFormat=american&apiKey=' + encodeURIComponent(key);
       try {
-        const { status, json } = await getJson(evUrl);
+        // (1142) tennis has no single feed key: "tennis" was sent and the feed always answered "Event not found",
+        // so live tennis prices could not be checked (every live tennis bet was refused) and the game page had no extras.
+        // Now the match's own tournament key is used (from the tennis board, then each open tournament; a miss is free).
+        let status, json;
+        if (sport === 'tennis') {
+          const cands = await tennisKeysFor(ctx, key, eventId);
+          for (const k of cands) {
+            const r = await getJson(evUrl(k));
+            status = r.status; json = r.json;
+            if (!(status === 404 || (json && /not.?found/i.test(String(json.message || json.error_code || ''))))) break;
+          }
+          if (!cands.length) { status = 404; json = { message: 'Event not found (no open tennis tournament)' }; }
+        } else {
+          const r = await getJson(evUrl(apiSport));
+          status = r.status; json = r.json;
+        }
         const ev = json && json.id ? json : (Array.isArray(json) ? json[0] : null);
         const games = ev ? normalize(sport, [ev]) : [];
         const props = ev && extraMkts ? normalizeProps(ev) : [];
-        const extras = ev && extraMkts.indexOf('team_totals') >= 0 ? normalizeExtras(ev) : null;
+        const extras = ev && extraMkts.indexOf('team_totals') >= 0 && extraMkts !== ALT_TT_MKTS ? normalizeExtras(ev) : null;
+        const soccerX = ev && extraMkts === SOCCER_X_MKTS ? normalizeSoccerX(ev) : null;   // (1142)
+        const altTT = ev && extraMkts === ALT_TT_MKTS ? normalizeAltTT(ev) : null;          // (1142)
         const liveAlts = ev && extraMkts.indexOf('alternate_spreads') >= 0 && extraMkts !== BUY_MKTS ? normalizeLiveAlts(ev) : null;
         const buyAlts = ev && extraMkts === BUY_MKTS ? normalizeBuyAlts(ev) : null;
         const perKey = ev ? periodOfMkts(extraMkts) : null;
-        const periodRow = perKey ? (normalizePeriod(sport, [ev], perKey)[0] || null) : null;
+        const periodRow = perKey ? ((perKey === 'sets' ? normalizeSets(sport, [ev]) : normalizePeriod(sport, [ev], perKey))[0] || null) : null;
         const err = (!ev && json && (json.message || json.error_code || json.error)) ? (json.message || json.error_code || json.error) : (status && status >= 400 ? ('http '+status) : null);
         const payload = { games, props, extras, liveAlts, sport, eventId, at: Date.now(), error: err, source: extraMkts ? 'event-props' : 'event-odds' };
         if (perKey) payload.period = periodRow;
         if (buyAlts) payload.buyAlts = buyAlts;
-        return { json: payload, cacheable: !!(games.length || extras), failed: !!err };
+        if (soccerX) payload.soccerX = soccerX;
+        if (altTT) payload.altTT = altTT;
+        return { json: payload, cacheable: !!(games.length || extras || soccerX || altTT), failed: !!err };
       } catch (e) {
         return { json: { games: [], error: String(e.message || e), source: 'event-odds' }, failed: true, thrown: true };
       }
@@ -704,7 +840,7 @@ async function runQuery(ctx, key, params, maxAge) {
   }
 
   return (await cached(ctx, 'main:' + sport, mainTtl, maxAge, async () => {
-    const markets = sport === 'tennis' ? 'h2h,totals' : 'h2h,spreads,totals';   // (1141) tennis: total games
+    const markets = 'h2h,spreads,totals';   // (1141) tennis: total games; (1142) + games handicap
     const keys = sport === 'tennis' ? await activeTennisKeys(key) : [apiSport];
     const url = 'https://api.the-odds-api.com/v4/sports/' + apiSport + '/odds?regions=us&markets=' + markets + '&oddsFormat=american' + (ROT_SPORTS[sport] ? '&includeRotationNumbers=true' : '') + '&apiKey=' + encodeURIComponent(key);
     try {
@@ -714,9 +850,9 @@ async function runQuery(ctx, key, params, maxAge) {
       if (sport === 'tennis') {
         const chunks = await Promise.all(keys.slice(0, 8).map(async (k) => {
           try {
-            const res = await getJson('https://api.the-odds-api.com/v4/sports/' + k + '/odds?regions=us&markets=h2h,totals&oddsFormat=american&apiKey=' + encodeURIComponent(key));
+            const res = await getJson('https://api.the-odds-api.com/v4/sports/' + k + '/odds?regions=us&markets=' + TENNIS_MAIN_MKTS + '&oddsFormat=american&apiKey=' + encodeURIComponent(key));
             const rows = Array.isArray(res.json) ? res.json : [];
-            rows.forEach(ev => { ev.tournament = tennisLabel(k); });
+            rows.forEach(ev => { ev.tournament = tennisLabel(k); ev.sport_key = ev.sport_key || k; rememberTennisKey(ev.id, k); });
             return rows;
           } catch (e) { return []; }
         }));
@@ -775,12 +911,25 @@ const VERIFY_PRE_MS = 60 * SEC;
 // Same market lists the page asks for, so checks reuse the page's cache entries.
 // (1130) more props (index.html has the same lists, so the page and this check share one cache entry)
 const PROP_MARKETS = {
-  nfl: 'player_pass_yds,player_pass_tds,player_pass_completions,player_pass_interceptions,player_rush_yds,player_receptions,player_anytime_td,player_reception_yds,player_rush_attempts,player_pass_attempts,player_rush_reception_yds,player_pass_rush_yds',
-  ncaaf: 'player_pass_yds,player_pass_tds,player_pass_completions,player_rush_yds,player_receptions,player_anytime_td',
-  nba: 'player_points,player_rebounds,player_assists,player_threes,player_points_rebounds_assists,player_points_rebounds,player_points_assists,player_rebounds_assists,player_steals,player_blocks,player_turnovers',
-  mlb: 'batter_hits,pitcher_strikeouts,batter_home_runs,batter_rbis,batter_runs_scored,batter_walks,pitcher_outs,pitcher_earned_runs,pitcher_hits_allowed',
-  nhl: 'player_points,player_goals,player_shots_on_goal,player_assists,player_total_saves,player_blocked_shots'
+  // (1142) more props (every one is graded from the ESPN box score). Same strings as the page's PROP_MARKETS.
+  nfl: 'player_pass_yds,player_pass_tds,player_pass_completions,player_pass_interceptions,player_rush_yds,player_receptions,player_anytime_td,player_reception_yds,player_rush_attempts,player_pass_attempts,player_rush_reception_yds,player_pass_rush_yds,player_reception_tds,player_rush_reception_tds,player_rush_longest,player_reception_longest,player_sacks,player_solo_tackles,player_tackles_assists,player_field_goals,player_kicking_points',
+  ncaaf: 'player_pass_yds,player_pass_tds,player_pass_completions,player_pass_interceptions,player_rush_yds,player_receptions,player_anytime_td,player_reception_yds,player_rush_attempts,player_pass_attempts,player_rush_reception_yds,player_pass_rush_yds,player_reception_tds',
+  nba: 'player_points,player_rebounds,player_assists,player_threes,player_points_rebounds_assists,player_points_rebounds,player_points_assists,player_rebounds_assists,player_steals,player_blocks,player_turnovers,player_blocks_steals',
+  mlb: 'batter_hits,pitcher_strikeouts,batter_home_runs,batter_rbis,batter_runs_scored,batter_walks,pitcher_outs,pitcher_earned_runs,pitcher_hits_allowed,batter_hits_runs_rbis,batter_strikeouts,pitcher_walks',
+  nhl: 'player_points,player_goals,player_shots_on_goal,player_assists,player_total_saves,player_blocked_shots,player_goal_scorer_anytime'
 };
+// (1142) alternate (milestone) props: loaded only when "Alt props" is opened on a match page
+const PROP_ALT_MARKETS = {
+  nfl: 'player_pass_yds_alternate,player_pass_tds_alternate,player_rush_yds_alternate,player_reception_yds_alternate,player_receptions_alternate,player_rush_reception_yds_alternate',
+  ncaaf: 'player_pass_yds_alternate,player_rush_yds_alternate,player_reception_yds_alternate,player_receptions_alternate',
+  nba: 'player_points_alternate,player_rebounds_alternate,player_assists_alternate,player_threes_alternate,player_points_rebounds_assists_alternate,player_points_rebounds_alternate,player_points_assists_alternate,player_rebounds_assists_alternate',
+  mlb: 'batter_hits_alternate,batter_home_runs_alternate,batter_rbis_alternate,batter_runs_scored_alternate,pitcher_strikeouts_alternate,pitcher_hits_allowed_alternate,pitcher_earned_runs_alternate',
+  nhl: 'player_points_alternate,player_goals_alternate,player_shots_on_goal_alternate,player_assists_alternate,player_total_saves_alternate,player_blocked_shots_alternate'
+};
+// (1142) soccer: both teams to score, double chance, draw no bet (one call when the "More" section is opened)
+const SOCCER_X_MKTS = 'btts,double_chance,draw_no_bet';
+// (1142) alternate team totals (only when "Alt team totals" is opened)
+const ALT_TT_MKTS = 'alternate_team_totals';
 const LIVE_CARD_MKTS = 'h2h,spreads,totals,alternate_spreads,alternate_totals';
 // (1130) team totals (+ alternate team totals) per sport, loaded when a game is opened (football: with the 1st-half totals)
 // (alternate team totals are left out: they would add a credit to every game the board loads)
@@ -788,14 +937,42 @@ const EXTRA_MKTS = 'team_totals,totals_h1,team_totals_h1';
 const TT_MKTS = 'team_totals';
 const TT_SPORTS = { nba: 1, ncaab: 1, nhl: 1, mlb: 1, wnba: 1 };
 function extraMktsFor(sport) { return TT_SPORTS[sport] ? TT_MKTS : EXTRA_MKTS; }
-const PERIOD_MKTS = { h1: 'h2h_h1,spreads_h1,totals_h1', q1: 'h2h_q1,spreads_q1,totals_q1', p1: 'h2h_p1,spreads_p1,totals_p1', f5: 'h2h_1st_5_innings,spreads_1st_5_innings,totals_1st_5_innings' };
+const PERIOD_MKTS = { h1: 'h2h_h1,spreads_h1,totals_h1', q1: 'h2h_q1,spreads_q1,totals_q1', p1: 'h2h_p1,spreads_p1,totals_p1', f5: 'h2h_1st_5_innings,spreads_1st_5_innings,totals_1st_5_innings',
+  // (1142) 2nd half, quarters 2-4, hockey periods 2-3, baseball 1st inning / first 3 / first 7
+  h2: 'h2h_h2,spreads_h2,totals_h2', q2: 'h2h_q2,spreads_q2,totals_q2', q3: 'h2h_q3,spreads_q3,totals_q3', q4: 'h2h_q4,spreads_q4,totals_q4',
+  p2: 'h2h_p2,spreads_p2,totals_p2', p3: 'h2h_p3,spreads_p3,totals_p3',
+  i1: 'h2h_1st_1_innings,spreads_1st_1_innings,totals_1st_1_innings', f3: 'h2h_1st_3_innings,spreads_1st_3_innings,totals_1st_3_innings', f7: 'h2h_1st_7_innings,spreads_1st_7_innings,totals_1st_7_innings',
+  // (1142) tennis: 1st set (winner, games handicap, games O/U), 2nd set winner, set betting (sets handicap, total sets)
+  s1: 'h2h_s1,spreads_s1,totals_s1', s2: 'h2h_s2', sets: 'alternate_set_spreads,alternate_set_totals' };
+const TENNIS_PERIODS = { s1: 1, s2: 1, sets: 1 };
+const TENNIS_MAIN_MKTS = 'h2h,spreads,totals';
+// (1142) which tournament each tennis match belongs to (filled from the tennis board)
+function rememberTennisKey(id, k) {
+  const m = mem['tennis:evkey'] || (mem['tennis:evkey'] = {});
+  if (id && k) m[String(id)] = k;
+  const ks = Object.keys(m); if (ks.length > 600) ks.slice(0, 200).forEach(x => delete m[x]);
+}
+async function tennisKeysFor(ctx, key, eventId) {
+  const out = [];
+  const add = k => { if (k && /^tennis_(atp|wta)_[a-z0-9_]+$/.test(k) && out.indexOf(k) < 0) out.push(k); };
+  add((mem['tennis:evkey'] || {})[String(eventId)]);
+  if (!out.length) {
+    try {
+      const b = await runQuery(ctx, key, { sport: 'tennis' });
+      const g = ((b && b.json && b.json.games) || []).find(x => String(x.id) === String(eventId));
+      if (g) add(g.skey);
+    } catch (e) {}
+  }
+  if (!out.length) { try { (await activeTennisKeys(key)).slice(0, 8).forEach(add); } catch (e) {} }
+  return out;
+}
 // (1137) Market keys a game page or price check may ask for. A request is cleaned to these keys (same order,
 // no repeats, at most 16), so nobody can make the server buy markets theboard does not offer. It used to be
 // cut at 240 characters instead, which chopped the 12-market NFL props list (243 characters) in the middle
 // of its last key ("player_pass_rush_"), so the Odds API refused the whole call and NFL showed no props.
 const ALLOWED_MKTS = (() => {
-  const all = [LIVE_CARD_MKTS, EXTRA_MKTS, TT_MKTS, BUY_MKTS, 'h2h,spreads,totals']
-    .concat(Object.keys(PROP_MARKETS).map(k => PROP_MARKETS[k]), Object.keys(PERIOD_MKTS).map(k => PERIOD_MKTS[k]));
+  const all = [LIVE_CARD_MKTS, EXTRA_MKTS, TT_MKTS, BUY_MKTS, 'h2h,spreads,totals', SOCCER_X_MKTS, ALT_TT_MKTS]
+    .concat(Object.keys(PROP_MARKETS).map(k => PROP_MARKETS[k]), Object.keys(PROP_ALT_MARKETS).map(k => PROP_ALT_MARKETS[k]), Object.keys(PERIOD_MKTS).map(k => PERIOD_MKTS[k]));
   const set = {};
   all.join(',').split(',').forEach(k => { if (k) set[k] = 1; });
   return set;
@@ -803,7 +980,7 @@ const ALLOWED_MKTS = (() => {
 function cleanMkts(raw) {
   const seen = {}, out = [];
   String(raw || '').toLowerCase().replace(/[^a-z0-9_,]/g, '').split(',').forEach(k => {
-    if (k && ALLOWED_MKTS[k] && !seen[k] && out.length < 16) { seen[k] = 1; out.push(k); }
+    if (k && ALLOWED_MKTS[k] && !seen[k] && out.length < 40) { seen[k] = 1; out.push(k); }   // (1142) was 16: the NFL props list is now 21 keys
   });
   return out.join(',');
 }
@@ -866,6 +1043,8 @@ function legKind(leg) {
   const mkt = String(leg.mkt || '');
   if (String(leg.period || '') === 'futures' || /^futures-/.test(String(leg.gid || ''))) return 'futures';
   if (mkt === 'prop') return 'prop';
+  if (mkt === 'btts' || mkt === 'dc' || mkt === 'dnb') return 'soccerx';   // (1142)
+  if (['ml', 'sp', 'tot', 'tt', 'h1tot', 'h1tt'].indexOf(mkt) < 0) return 'unknown';   // (1142) a market the board does not offer is never taken unchecked
   if (mkt === 'tt' || mkt === 'h1tot' || mkt === 'h1tt') return 'extra';
   if ((mkt === 'sp' || mkt === 'tot' || mkt === 'ml') && PERIOD_MKTS[String(leg.period || '')]) return 'period';   // (1130) + period moneyline
   if (mkt === 'ml' || mkt === 'sp' || mkt === 'tot') return PERIOD_MKTS[String(leg.period || '')] ? 'uncovered' : 'main';
@@ -920,6 +1099,9 @@ async function checkLeg(leg, i, ask, opts) {
     return blocked('Buying points is only offered on football and basketball full-game spreads and totals: ' + label, { buy: true });
   }
   if (kind === 'uncovered') return Object.assign(res, { status: 'uncovered' });
+  if (kind === 'unknown') return blocked('That bet type is not offered: ' + label);
+  if (kind === 'soccerx' && !/^soccer_/.test(String(SPORT_MAP[sport] || ''))) return blocked('That bet type is only offered on soccer: ' + label);
+  if (kind === 'prop' && /_alternate$/.test(String(leg.propMarket || '')) && !PROP_ALT_MARKETS[sport]) return blocked('Alternate props are not offered for this sport: ' + label);
   if (kind === 'futures') {
     const fsport = sport || String(leg.gid || '').replace(/^futures-/, '');
     if (!FUTURES_KEYS[fsport]) return Object.assign(res, { status: 'uncovered' });
@@ -1013,7 +1195,7 @@ async function checkLeg(leg, i, ask, opts) {
   if (live && gatePer) {
     let gate;
     try { gate = await (opts.gate || require('./grade').periodGate)(sport, gatePer, leg, rec); } catch (e) { gate = { unknown: 'error' }; }
-    const name = { h1: '1st half', q1: '1st quarter', p1: '1st period', f5: 'first 5 innings', game: 'game' }[gatePer] || 'period';
+    const name = { h1: '1st half', q1: '1st quarter', p1: '1st period', f5: 'first 5 innings', game: 'game', s1: '1st set', s2: '2nd set', sets: 'match', h2: '2nd half', q2: '2nd quarter', q3: '3rd quarter', q4: '4th quarter', p2: '2nd period', p3: '3rd period', i1: '1st inning', f3: 'first 3 innings', f7: 'first 7 innings' }[gatePer] || 'period';
     if (gate && gate.over) return blocked('The ' + name + ' is over, so this line is closed: ' + label, { started: true, periodOver: true });
     if (!gate || gate.over !== false) return blocked('Could not confirm the game clock for this ' + name + ' line. Bet not placed.', { unavailable: true });
   }
@@ -1023,19 +1205,38 @@ async function checkLeg(leg, i, ask, opts) {
 
   if (kind === 'prop') {
     if (live) return blocked('Props are pregame only. Bet not placed.', { started: true });
-    const mk = PROP_MARKETS[sport];
+    const altProp = /_alternate$/.test(String(leg.propMarket || ''));   // (1142)
+    const mk = altProp ? PROP_ALT_MARKETS[sport] : PROP_MARKETS[sport];
     if (!mk) return Object.assign(res, { status: 'uncovered' });
     const ev = await ask({ sport, event: evId, markets: mk }, VERIFY_LIVE_MS);
     const err = feedErr(ev);
     if (err === 'gone') return blocked('This game is no longer on the board: ' + label, { gone: true });
     if (err) return unavailable();
     const player = String(leg.propPlayer || '').toLowerCase();
-    const hit = (ev.props || []).find(p => String(p.player || '').toLowerCase() === player && (!leg.propMarket || p.market === leg.propMarket));
+    const hit = (ev.props || []).find(p => String(p.player || '').toLowerCase() === player && (!leg.propMarket || p.market === leg.propMarket) && (!altProp || same(p.line, num(leg.currentTotal))));
+    if (altProp && !hit) return blocked('That alternate prop line is not offered: ' + label, { gone: true });
     if (!hit) return blocked('That prop is off the board right now: ' + label, { gone: true });
     const p = leg.side === 'o' ? hit.over : leg.side === 'u' ? hit.under : hit.yes;
     if (p == null) return blocked('That prop side is off the board right now: ' + label, { gone: true });
     res.src = 'prop';
     return lineAndPrice(res, odds, num(p), num(leg.currentTotal), num(hit.line));
+  }
+  if (kind === 'soccerx') {
+    const ev = await ask({ sport, event: evId, markets: SOCCER_X_MKTS }, live ? VERIFY_LIVE_MS : VERIFY_PRE_MS);
+    const err = feedErr(ev);
+    if (err === 'gone') return blocked('This game is no longer on the board: ' + label, { gone: true });
+    if (err) return unavailable();
+    const x = ev.soccerX || {};
+    const sd = String(leg.side || '');
+    let p = null, upd = null;
+    if (leg.mkt === 'btts' && x.btts) { p = sd === 'y' ? x.btts.y : sd === 'n' ? x.btts.n : null; upd = x.btts.upd; }
+    if (leg.mkt === 'dnb' && x.dnb) { const s2 = sideFor(sd); p = s2 === 'h' ? x.dnb.h : s2 === 'a' ? x.dnb.a : null; upd = x.dnb.upd; }
+    if (leg.mkt === 'dc' && x.dc) { const s2 = fl ? ({ hd: 'ad', ad: 'hd', ha: 'ha' })[sd] : sd; p = (s2 === 'hd' || s2 === 'ad' || s2 === 'ha') ? x.dc[s2] : null; upd = x.dc.upd; }
+    if (p == null) return blocked('That line is off the board right now: ' + label, { gone: true });
+    if (Number(p) <= ML_HEAVY || Number(p) > 370) return blocked('That line is off the board (price out of range): ' + label, { gone: true });
+    if (staleLive(upd)) return blocked('That live line has not updated in over 2 minutes (the feed is behind). Bet not placed: ' + label, { unavailable: true, stale: true });
+    res.src = 'soccerX';
+    return price(res, odds, num(p));
   }
   if (kind === 'extra') {
     if ((leg.mkt === 'h1tot' || leg.mkt === 'h1tt') && TT_SPORTS[sport]) return Object.assign(res, { status: 'uncovered' });
@@ -1048,7 +1249,21 @@ async function checkLeg(leg, i, ask, opts) {
     const pack = leg.mkt === 'h1tot' ? x.h1 : leg.mkt === 'tt' ? (team === 'h' ? x.ttH : team === 'a' ? x.ttA : null) : (team === 'h' ? x.h1H : team === 'a' ? x.h1A : null);
     const p = pack && (leg.side === 'o' ? pack.over : leg.side === 'u' ? pack.under : null);
     const sentLine = num(leg.currentTotal);
-    if (leg.alt === true) return blocked('Alternate team totals are not offered. Bet not placed: ' + label, { gone: true });
+    if (leg.alt === true) {
+      // (1142) alternate team totals: that exact team, line and price from the book's ladder, -200 / +150 like alt lines
+      if (leg.mkt !== 'tt') return blocked('Alternate lines are only offered on full-game team totals: ' + label, { gone: true });
+      const av = await ask({ sport, event: evId, markets: ALT_TT_MKTS }, live ? VERIFY_LIVE_MS : VERIFY_PRE_MS);
+      const aerr = feedErr(av);
+      if (aerr === 'gone') return blocked('This game is no longer on the board: ' + label, { gone: true });
+      if (aerr) return unavailable();
+      const lad = (av.altTT && (team === 'h' ? av.altTT.h : team === 'a' ? av.altTT.a : null)) || [];
+      const r = lad.find(x => same(x.point, sentLine));
+      const ap = r && (leg.side === 'o' ? r.over : leg.side === 'u' ? r.under : null);
+      if (ap == null || Number(ap) < ALT_MIN_PRICE || Number(ap) > ALT_MAX_PRICE) return blocked('That alternate team total is not offered: ' + label, { gone: true });
+      if (staleLive(av.altTT.upd)) return blocked('That live line has not updated in over 2 minutes (the feed is behind). Bet not placed: ' + label, { unavailable: true, stale: true });
+      res.src = 'altTT';
+      return lineAndPrice(res, odds, num(ap), sentLine, num(r.point));
+    }
     if (!pack || p == null) return blocked('That line is off the board right now: ' + label, { gone: true });
     if (staleLive(pack.upd)) return blocked('That live line has not updated in over 2 minutes (the feed is behind). Bet not placed: ' + label, { unavailable: true, stale: true });
     res.src = 'extras';
@@ -1056,6 +1271,11 @@ async function checkLeg(leg, i, ask, opts) {
   }
   if (kind === 'period') {
     const per = String(leg.period);
+    // (1142) a period only on the sports that play it (hockey periods, baseball innings, tennis sets, quarters)
+    const fam = String(SPORT_MAP[sport] || '');
+    const famOk = /^p[123]$/.test(per) ? /^icehockey_/.test(fam) : /^(f3|f5|f7|i1)$/.test(per) ? /^baseball_/.test(fam) : /^(s1|s2|sets)$/.test(per) ? /^tennis/.test(fam) || sport === 'tennis'
+      : /^q[1234]$/.test(per) ? /^(americanfootball_|basketball_(nba|wnba|wncaab))/.test(fam) : true;
+    if (!famOk) return blocked('That period is not offered for this sport: ' + label, { gone: true });
     const ev = await ask({ sport, event: evId, markets: PERIOD_MKTS[per] }, live ? VERIFY_LIVE_MS : VERIFY_PRE_MS);
     const err = feedErr(ev);
     if (err === 'gone') return blocked('This game is no longer on the board: ' + label, { gone: true });
