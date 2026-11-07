@@ -108,10 +108,33 @@ const toks = s => norm(s).split(' ').filter(w => w && !STOP[w]);
 // ESPN's exact names for it (full name, short name, location + nickname, location, abbreviation).
 // Never a subset / shared word: "Western Michigan Broncos" is not "Michigan", "LSU Tigers" is not "Auburn Tigers".
 const key = s => toks(s).join(' ');
+// (1147) ESPN often keeps a school nickname adjective the Odds API drops ("Runnin' Bulldogs" vs "Bulldogs",
+// "Fighting Irish" vs "Irish"). Normalize those phrases so the same school still matches. Never strips the
+// school itself: "Georgia Bulldogs" still does not equal "Georgia Southern", "Michigan" still does not equal
+// "Western Michigan". findGame keeps sport / day / unique-candidate guards on top of this.
+const NICK_ALIAS = [
+  [/\brunnin(?:g)? bulldogs\b/g, 'bulldogs'],
+  [/\brunnin(?:g)? rebels\b/g, 'rebels'],
+  [/\bfighting irish\b/g, 'irish'],
+  [/\bfighting illini\b/g, 'illini'],
+  [/\bfighting hawks\b/g, 'hawks'],
+  [/\bfighting gamecocks\b/g, 'gamecocks'],
+  [/\bfighting sioux\b/g, 'sioux'],
+  [/\bdiamond jaxx\b/g, 'jaxx'],
+  [/\bgolden tornadoes\b/g, 'tornadoes']
+];
+function nickKey(s) {
+  let x = ' ' + key(s) + ' ';
+  NICK_ALIAS.forEach(([re, to]) => { x = x.replace(re, ' ' + to + ' '); });
+  return x.replace(/\s+/g, ' ').trim();
+}
 function teamMatch(name, team) {
   const T = key(name);
   if (!T || !team) return false;
-  return (team.keys || team.names.map(key)).indexOf(T) >= 0;
+  const keys = team.keys || team.names.map(key);
+  if (keys.indexOf(T) >= 0) return true;
+  const Tn = nickKey(name);
+  return keys.some(k => k === Tn || nickKey(k) === Tn);
 }
 // any shared significant word (used only to refuse a "Lost" on a futures ticket whose name is close)
 const GENERIC = { state: 1, st: 1, college: 1, tech: 1, and: 1, north: 1, south: 1, east: 1, west: 1, central: 1, northern: 1, southern: 1, eastern: 1, western: 1 };
@@ -1258,5 +1281,5 @@ exports.runGrade = runGrade;
 exports.NOW_BUDGET_MS = NOW_BUDGET_MS;
 exports.periodGate = periodGate;
 exports.gidCheck = gidCheck;
-exports._test = { periodOver, periodUnits, _setGateFetch, decide, gradeLeg, findGame, teamMatch, norm, spreadLine, totalLine, teamsOf, leagueOf, periodOf, parseWhen, needsFor, loadBoards, parseBoard, LEAGUES, propStat, parseChampion, gradeFutures, futuresNeeds, loadDetails, loadChampions, samePerson,
+exports._test = { periodOver, periodUnits, _setGateFetch, decide, gradeLeg, findGame, teamMatch, nickKey, norm, spreadLine, totalLine, teamsOf, leagueOf, periodOf, parseWhen, needsFor, loadBoards, parseBoard, LEAGUES, propStat, parseChampion, gradeFutures, futuresNeeds, loadDetails, loadChampions, samePerson,
   gidCheck, crossCheck, scoresNeeded, loadScores, FUTURES, futKey, futYear, PROP_STATS };
