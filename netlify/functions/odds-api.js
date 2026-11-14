@@ -436,8 +436,61 @@ function normalizeLiveAlts(ev) {
 // so a bought line is looked up exactly as the bettor holds it. Only the book the main board uses.
 const BUY_MKTS = 'alternate_spreads,alternate_totals';
 const BUY_SPORTS = { nfl: 1, ncaaf: 1, cfl: 1, nba: 1, ncaab: 1, wnba: 1 };
-const BUY_MAX = 2;                       // points, either way
+const BUY_MAX = 2;                       // points, either way (four half-point steps)
 const BUY_MIN_PRICE = -200, BUY_MAX_PRICE = 150;   // same limit the board uses for spreads / totals
+const BUY_CENTS = 10;                    // (1150) standard book juice per ordinary half-point
+// House buy-points formula (1150): 10¢ per ½ pt, same math on the phone and at placement.
+// NFL spreads pay 25¢ onto/off 3 and 15¢ onto/off 7; NCAAF pays 15¢ onto/off 3 (7 stays 10¢).
+// NBA / WNBA / CFL / NCAAB spreads and every total stay a flat 10¢. Some books refuse to sell
+// 3 and 7; we sell them at the premium instead. Alternate-line bets (leg.alt) are unchanged.
+function buyEvenOdds(o) { return o === -100 ? 100 : o; }
+function shiftJuice(odds, cents) {
+  let o = Number(odds);
+  if (!Number.isFinite(o) || !cents) return buyEvenOdds(o);
+  const dir = cents > 0 ? 1 : -1;
+  let left = Math.abs(Math.round(cents));
+  while (left--) {
+    if (dir > 0) {
+      if (o >= 100) o = o === 100 ? -101 : o - 1;
+      else o -= 1;
+    } else {
+      if (o <= -101) o = o === -101 ? 100 : o + 1;
+      else o += 1;
+    }
+  }
+  return buyEvenOdds(o);
+}
+function buyStepCents(sport, mkt, from, to) {
+  if (mkt !== 'sp') return BUY_CENTS;
+  const s = String(sport || '').toLowerCase();
+  if (s !== 'nfl' && s !== 'ncaaf') return BUY_CENTS;
+  const A = Math.abs(Number(from)), B = Math.abs(Number(to));
+  const near = (x, y) => Math.abs(x - y) < 1e-9;
+  const crossesKey = key => (near(A, key) && (near(B, key + 0.5) || near(B, key - 0.5))) || (near(B, key) && (near(A, key + 0.5) || near(A, key - 0.5)));
+  if (crossesKey(3)) return s === 'nfl' ? 25 : 15;
+  if (crossesKey(7)) return s === 'nfl' ? 15 : BUY_CENTS;
+  return BUY_CENTS;
+}
+function buyJuiceDir(mkt, side, lineDir) {
+  // Over: a lower total is a buy (pay juice). Spreads and Under: a higher number is a buy.
+  return (mkt === 'tot' && String(side || '') === 'o') ? -lineDir : lineDir;
+}
+function boughtOdds(baseOdds, sport, mkt, baseLine, adj, side) {
+  const steps = Math.round(Number(adj) * 2);
+  if (!steps) return buyEvenOdds(Number(baseOdds));
+  if (!Number.isFinite(Number(baseOdds)) || !Number.isFinite(Number(baseLine))) return null;
+  const lineDir = steps > 0 ? 1 : -1;
+  const juiceDir = buyJuiceDir(mkt, side, lineDir);
+  let line = Number(baseLine);
+  let odds = Number(baseOdds);
+  for (let i = 0; i < Math.abs(steps); i++) {
+    const next = Math.round((line + lineDir * 0.5) * 10) / 10;
+    odds = shiftJuice(odds, juiceDir * buyStepCents(sport, mkt, line, next));
+    line = next;
+  }
+  if (odds < BUY_MIN_PRICE || odds > BUY_MAX_PRICE) return null;
+  return odds;
+}
 function normalizeBuyAlts(ev) {
   const book = pickBook(ev);
   if (!book) return null;
@@ -1370,9 +1423,10 @@ function mainMarket(res, leg, sent, row, alts, sideFor, allowBuy) {
   return res;
 }
 
-// (1128) A bought line (pregame, football / basketball, full game): priced from the book's REAL alternate
-// line for that exact number, never a formula. Same book and the same freshness as the main board check.
-// Line not offered (or priced past the board's -200 / +150 limit) -> the slip goes back to the main line.
+// (1150) A bought line (pregame, football / basketball, full game): priced from the house juice
+// formula (10¢ per ½ pt, NFL/NCAAF key-number premiums on 3 and 7). The main board line and
+// price are still checked; if they moved, the slip is sent back with the new formula price.
+// Past the board's -200 / +150 limit -> the slip goes back to the main line.
 async function boughtLine(res, leg, sent, rec, sideFor, adj, ask, sport, evId) {
   const label = String(leg.label || leg.matchup || 'a selection').slice(0, 120);
   if (Math.abs(adj) > BUY_MAX + 1e-9 || Math.abs(adj * 2 - Math.round(adj * 2)) > 0.001) return Object.assign(res, { status: 'blocked', msg: 'Bad bought line on ' + label + ' (max ' + BUY_MAX + ' points).', buy: true });
@@ -1386,16 +1440,12 @@ async function boughtLine(res, leg, sent, rec, sideFor, adj, ask, sport, evId) {
     if (p != null) main = { line: Number(rec.total), price: Number(p) };
   }
   if (!main) return Object.assign(res, { status: 'blocked', msg: (leg.mkt === 'sp' ? 'The spread' : 'The total') + ' is off the board right now: ' + label, gone: true });
-  const ev = await ask({ sport, event: evId, markets: BUY_MKTS }, VERIFY_PRE_MS);
-  const err = feedErr(ev);
-  if (err === 'gone') return Object.assign(res, { status: 'blocked', msg: 'This game is no longer on the board: ' + label, gone: true });
-  if (err) return Object.assign(res, { status: 'blocked', msg: 'Could not verify the bought line right now. Bet not placed.', unavailable: true });
-  const ba = ev && ev.buyAlts;
   const wantLine = Math.round((main.line + adj) * 10) / 10;
-  const p = ba && ba.book === rec.book ? altPrice(ba, leg.mkt, side, wantLine) : null;
-  res.src = 'alt:' + ((ba && ba.book) || '');
-  if (p == null || p < BUY_MIN_PRICE || p > BUY_MAX_PRICE) {
-    // that exact line isn't offered: back to the main line at its price
+  if (leg.mkt === 'tot' && wantLine <= 0) return Object.assign(res, { status: 'blocked', msg: 'Bad bought line on ' + label + ' (max ' + BUY_MAX + ' points).', buy: true });
+  const p = boughtOdds(main.price, sport, leg.mkt, main.line, adj, leg.side);
+  res.src = 'buy:' + (rec.book || '');
+  if (p == null) {
+    // past the board's price cap: back to the main line at its price
     return Object.assign(res, { status: 'changed', line: main.line, odds: main.price, main: true, buyGone: true });
   }
   Object.assign(res, { odds: p, line: wantLine, baseOdds: main.price, baseLine: main.line, bought: adj, main: true });
@@ -1452,5 +1502,5 @@ async function fetchScores(sport, event) {
 exports.fetchScores = fetchScores;
 
 exports.verifyLegs = verifyLegs;
-exports._verify = { orient, legKind, PROP_MARKETS, normalizeBuyAlts, altPrice, BUY_MKTS, BUY_SPORTS, BUY_MAX, normalizePeriod, normalizeExtras, LIVE_STALE_MS,
+exports._verify = { orient, legKind, PROP_MARKETS, normalizeBuyAlts, altPrice, BUY_MKTS, BUY_SPORTS, BUY_MAX, BUY_CENTS, shiftJuice, buyStepCents, boughtOdds, normalizePeriod, normalizeExtras, LIVE_STALE_MS,
   EXTRA_MKTS, TT_MKTS, extraMktsFor, PERIOD_MKTS, FUTURES_KEYS, PRE_STALE_MS, normalizeProps, normalize };
