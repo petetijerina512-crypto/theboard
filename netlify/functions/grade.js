@@ -1222,9 +1222,9 @@ async function runGrade(store, opts) {
   const sc = opts.noScores ? null : await loadScores(scoresNeeded(first, games, now), opts.scoresImpl);
   if (sc) games.scores = sc;
   const allErrors = errors.concat(fut.errors, det.errors);   // (1130) the /scores notes go in report.scores, not in errors
-  const report = { at: new Date(now).toISOString(), calls: calls + fut.calls + det.calls, games: games.length, finals: games.filter(g => g.completed).length, errors: allErrors.slice(0, 20), graded: 0, changes: [], waiting: [] };
+  const report = { at: new Date(now).toISOString(), calls: calls + fut.calls + det.calls, games: games.length, finals: games.filter(g => g.completed).length, errors: allErrors.slice(0, 20), graded: 0, changes: [], waiting: [], urgentAlerts: [] };
   const apply = st => {
-    report.graded = 0; report.changes = []; report.waiting = [];
+    report.graded = 0; report.changes = []; report.waiting = []; report.urgentAlerts = [];
     Object.keys(st.bets || {}).forEach(id => (st.bets[id] || []).forEach(bet => {
       const d = decide(bet, games, now);
       if (!d) return;
@@ -1253,6 +1253,19 @@ async function runGrade(store, opts) {
         if (opts.dryRun) report.open = (report.open || []).concat([{ user: id, bet: bet.id, legs: d.legs.map(x => x.why) }]);
         if (late) report.waiting.push({ user: id, bet: bet.id, reasons: d.legs.map((x, i) => (x.r ? null : (teamsOf(bet.selections[i]) ? teamsOf(bet.selections[i]).away + ' @ ' + teamsOf(bet.selections[i]).home : 'leg ' + (i + 1)) + ': ' + x.why)).filter(Boolean) });
       }
+      // (1151) if this pass (or earlier forced results) leaves exactly one leg to win, alert once
+      const view = opts.dryRun ? {
+        id: bet.id, stake: bet.stake, status: d.status || bet.status,
+        selections: bet.selections.map((s, i) => Object.assign({}, s, { result: d.results[i] || s.result })),
+        urgentOneLegAlerted: bet.urgentOneLegAlerted
+      } : bet;
+      if (opts.dryRun) {
+        const msg = B.formatUrgentOneLeg(id, view, now);
+        if (msg) report.urgentAlerts.push({ user: id, bet: bet.id, msg, dryRun: true });
+      } else {
+        const msg = B.queueUrgentOneLeg(id, view, now);
+        if (msg) report.urgentAlerts.push({ user: id, bet: bet.id, msg });
+      }
     }));
     report.waiting = report.waiting.slice(0, 60);
     report.ms = Date.now() - t0;
@@ -1263,6 +1276,12 @@ async function runGrade(store, opts) {
   };
   if (opts.dryRun) apply(first);
   else await B.mutate(store, apply);   // decided again on the freshest copy of every ticket
+  // (1151) send only after the write lands so concurrent/retrying runs cannot double-send
+  if (!opts.dryRun && report.urgentAlerts && report.urgentAlerts.length) {
+    for (const a of report.urgentAlerts) {
+      try { await B.sendAlert(a.msg, { urgent: true }); } catch (e) {}
+    }
+  }
   return report;
 }
 

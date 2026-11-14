@@ -345,34 +345,144 @@ function viewFor(st, me) {
 }
 
 // ---------- alerts (Telegram) ----------
-async function sendAlert(msg) {
+async function sendAlert(msg, opts) {
   const token = process.env.TELEGRAM_BOT_TOKEN || process.env.TG_TOKEN;
   const chats = String(process.env.TELEGRAM_CHAT_IDS || process.env.TG_CHATS || '').split(',').map(s => s.trim()).filter(Boolean);
   const results = [];
-  if (!token || !chats.length || !msg) return results;
-  for (const chat of chats) {
-    try {
-      const ctrl = new AbortController();
-      const t = setTimeout(() => ctrl.abort(), 4000);
-      const res = await fetch('https://api.telegram.org/bot' + token + '/sendMessage', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chat_id: chat, text: String(msg).slice(0, 3500) }), signal: ctrl.signal
-      });
-      clearTimeout(t);
-      results.push({ ok: res.ok });
-    } catch (e) { results.push({ ok: false }); }
+  const text = String(msg || '');
+  const urgent = !!(opts && opts.urgent) || /^\s*URGENT\b/i.test(text);
+  if (!token || !chats.length || !text) {
+    // still try email below if configured
+  } else {
+    for (const chat of chats) {
+      try {
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), 4000);
+        const res = await fetch('https://api.telegram.org/bot' + token + '/sendMessage', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ chat_id: chat, text: text.slice(0, 3500) }), signal: ctrl.signal
+        });
+        clearTimeout(t);
+        results.push({ ok: res.ok });
+      } catch (e) { results.push({ ok: false }); }
+    }
   }
   const resendKey = process.env.RESEND_KEY;
   const emailTo = process.env.ALERT_EMAIL || 'pete_tijerina@icloud.com'; // same default as the old sms.js
-  if (resendKey && emailTo) {
+  if (resendKey && emailTo && text) {
     try {
       await fetch('https://api.resend.com/emails', {
         method: 'POST', headers: { Authorization: 'Bearer ' + resendKey, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ from: 'The Board <alerts@theboard.my>', to: [emailTo], subject: 'Bet', text: String(msg).slice(0, 3500) })
+        body: JSON.stringify({ from: 'The Board <alerts@theboard.my>', to: [emailTo], subject: urgent ? 'URGENT' : 'Bet', text: text.slice(0, 3500) })
       });
     } catch (e) {}
   }
   return results;
+}
+
+// (1151) Urgent admin alert: a parlay has exactly one leg left that still needs to win.
+const ONE_LEG_DROP = { push: 1, void: 1 };
+const ONE_LEG_KILL = { lost: 1, cancelled: 1 };
+const ONE_LEG_SETTLED = { won: 1, lost: 1, push: 1, cancelled: 1 };
+
+function legResultOf(s) {
+  return s && s.result ? String(s.result).toLowerCase() : '';
+}
+
+function startMsOf(s) {
+  if (!s) return null;
+  const v = s.commence || s.gameDate;
+  if (!v || !/T\d\d:/.test(String(v))) return null;
+  const t = new Date(v).getTime();
+  return isNaN(t) ? null : t;
+}
+
+function parlayToWin(stake, sels) {
+  let d = 1;
+  (sels || []).forEach(s => {
+    const r = legResultOf(s);
+    if (ONE_LEG_DROP[r]) return;
+    const o = Number(s && (s.lockedOdds != null ? s.lockedOdds : s.odds) || 0);
+    if (o) d *= (o > 0 ? 1 + o / 100 : 1 + 100 / Math.abs(o));
+  });
+  const n = Number(stake || 0);
+  return Number.isFinite(d) && d > 1 && Number.isFinite(n) ? Math.round(n * (d - 1) * 100) / 100 : 0;
+}
+
+function oneLegParlay(bet) {
+  if (!bet || bet.kind === 'casino') return null;
+  const status = String(bet.status || '');
+  if (status !== 'open' || ONE_LEG_SETTLED[status]) return null;
+  const sels = bet.selections || [];
+  if (sels.length < 2) return null;
+  const pending = [], hit = [];
+  for (let i = 0; i < sels.length; i++) {
+    const s = sels[i];
+    const r = legResultOf(s);
+    if (ONE_LEG_KILL[r]) return null;
+    if (!r) pending.push({ s, i });
+    else hit.push({ s, i, r });
+  }
+  if (pending.length !== 1) return null;
+  return { pending: pending[0], hit };
+}
+
+function legIsLiveNow(s, now) {
+  now = now || Date.now();
+  const t = startMsOf(s);
+  if (t != null && now < t) return false;
+  if (t != null && now >= t) return true;
+  return !!(s && (s.liveAtAdd || s.liveAtBet));
+}
+
+function chicagoWhen(ms) {
+  if (ms == null || !Number.isFinite(ms)) return 'time TBD';
+  const d = new Date(ms);
+  if (isNaN(d.getTime())) return 'time TBD';
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Chicago', weekday: 'short', month: 'short', day: 'numeric',
+    hour: 'numeric', minute: '2-digit', hour12: true
+  }).format(d) + ' CT';
+}
+
+function oneLegPick(s) {
+  if (!s) return 'a pick';
+  return String(s.label || s.matchup || 'a pick').replace(/\s+/g, ' ').trim();
+}
+
+function formatUrgentOneLeg(userId, bet, now) {
+  const info = oneLegParlay(bet);
+  if (!info) return null;
+  now = now || Date.now();
+  const stake = Math.round(Number(bet.stake || 0) * 100) / 100;
+  const win = parlayToWin(stake, bet.selections);
+  const rem = info.pending.s;
+  const start = startMsOf(rem);
+  const live = legIsLiveNow(rem, now);
+  const hit = info.hit.map(x => oneLegPick(x.s) + ' (' + x.r + ')').join('; ') || 'none';
+  const game = rem.matchup || [rem.away, rem.home].filter(Boolean).join(' @ ') || '';
+  const sport = String(rem.sport || '').toUpperCase();
+  const remLine = oneLegPick(rem) + (game && oneLegPick(rem).indexOf(game) < 0 ? ' · ' + game : '') + (sport ? ' · ' + sport : '');
+  const when = start != null ? chicagoWhen(start) : 'time TBD';
+  const liveTxt = live ? 'LIVE now' : (start != null && start > now ? 'not started' : 'not started');
+  const who = String(userId || 'player');
+  const id = String(bet.id || '');
+  return (
+    'URGENT: ' + who + ' is one leg away on ticket ' + id + '\n' +
+    'Stake $' + stake.toFixed(2) + (win ? ' to win $' + win.toFixed(2) : '') + '\n' +
+    'Already hit: ' + hit + '\n' +
+    'Remaining: ' + remLine + ' · starts ' + when + ' · ' + liveTxt
+  );
+}
+
+// Persist the send-once flag on the ticket, then return the message to send.
+// Safe inside mutate: a retry or later grade pass sees urgentOneLegAlerted and skips.
+function queueUrgentOneLeg(userId, bet, now) {
+  if (!bet || bet.urgentOneLegAlerted) return null;
+  const msg = formatUrgentOneLeg(userId, bet, now);
+  if (!msg) return null;
+  bet.urgentOneLegAlerted = new Date(now || Date.now()).toISOString();
+  return msg;
 }
 
 // ---------- http helpers ----------
@@ -395,6 +505,7 @@ module.exports = {
   HttpError, setTestStore, getStore, mutate, readState, readKey, normalize, migrate,
   hashPassword, verifyPassword, makeToken, readToken, requireUser, findUser, isAdmin,
   ticketNet, computeBalances, balanceOf, viewFor, publicUser, sendAlert,
+  oneLegParlay, parlayToWin, formatUrgentOneLeg, queueUrgentOneLeg, legIsLiveNow,
   reply, fail, parseBody, clientIp, KEY, AUTH_KEY, sameKey,
   LIMIT_FIELDS, limitOverride, seedMin, globalLimits, limitsOf, openExposure
 };

@@ -321,7 +321,12 @@ function placeBet(st, me, body, ctx, ver) {
   st.idem[userKey] = [{ k: idem, id, at: now }].concat((st.idem[userKey] || []).filter(x => now - x.at < 7 * 864e5)).slice(0, 100);
   // (1143) the alert is written here from the checked legs (feed teams, checked line and price), never the phone's text
   const msg = betAlert(me.id, stake, clean);
-  ctx.after = () => B.sendAlert(msg);
+  // (1151) if this parlay already has only one leg left to win (e.g. admin-placed with prior results), alert once
+  const urgent = B.queueUrgentOneLeg(userKey, ticket, now);
+  ctx.after = async () => {
+    await B.sendAlert(msg);
+    if (urgent) await B.sendAlert(urgent, { urgent: true });
+  };
   return { ok: true, ticket, balance: B.balanceOf(st, userKey) };
 }
 
@@ -375,7 +380,14 @@ function patchTickets(st, me, body) {
       });
     }
     if (t.status === 'open') { delete t.settledAt; }
-    if (changed) { t.rev = Number(t.rev || 1) + 1; t.updatedBy = me.id; out.applied.push({ id: t.id, rev: t.rev }); }
+    if (t.status === 'open') {
+      const urgent = B.queueUrgentOneLeg(p.userId, t, Date.now());
+      if (urgent) {
+        (out.urgentAlerts = out.urgentAlerts || []).push(urgent);
+        changed = true;
+      }
+    }
+    if (changed) { t.rev = Number(t.rev || 1) + 1; t.updatedBy = me.id; out.applied.push({ id: t.id, rev: t.rev, userId: p.userId }); }
   });
   if (!out.applied.length) out.noWrite = true;
   return out;
@@ -1027,10 +1039,13 @@ exports.handler = async (event) => {
       return out;
     });
     if (ctx.after) { try { await ctx.after(); } catch (e) {} }
-    delete result.noWrite; delete result.st;
+    if (result.urgentAlerts && result.urgentAlerts.length) {
+      for (const m of result.urgentAlerts) { try { await B.sendAlert(m, { urgent: true }); } catch (e) {} }
+    }
+    delete result.noWrite; delete result.st; delete result.urgentAlerts;
     return B.reply(200, result);
   } catch (e) { return B.fail(e); }
 };
-exports._test = Object.assign(exports._test || {}, { playerResults, legTimeMs, sameTeamMlSpread, stampVerified, placeBet, SAME_TEAM_MSG, gidConflict, setLimits, settledHistory, ticketDay, chicagoMidnight, betAlert, alertLeg });
+exports._test = Object.assign(exports._test || {}, { playerResults, legTimeMs, sameTeamMlSpread, stampVerified, placeBet, SAME_TEAM_MSG, gidConflict, setLimits, settledHistory, ticketDay, chicagoMidnight, betAlert, alertLeg, patchTickets });
 
 exports.stateView = stateView;
