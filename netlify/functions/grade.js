@@ -87,15 +87,28 @@ const ALIAS = [
   [/\bumass\b/g, 'massachusetts'], [/\buconn\b/g, 'connecticut'], [/\bfiu\b/g, 'florida international'],
   [/\bflorida intl\b/g, 'florida international'], [/\bapp state\b/g, 'appalachian state'],
   [/\bul monroe\b/g, 'louisiana monroe'], [/\bulm\b/g, 'louisiana monroe'], [/\bla tech\b/g, 'louisiana tech'],
-  [/\bsouthern miss\b/g, 'southern mississippi'], [/\bmiami fl\b/g, 'miami'], [/\bsaint\b/g, 'st'],
+  [/\bsouthern miss\b/g, 'southern mississippi'], [/\bmiami fl\b/g, 'miami'], [/\bsaint\b/g, 'st'], [/\bmt\b/g, 'mount'],  // (1152) Mt. St. Mary's = Mount St. Mary's
   [/\bst\.\s/g, 'st '], [/\bpenn st\b/g, 'penn state'], [/\bsam houston state\b/g, 'sam houston'], [/\bole miss\b/g, 'ole miss'], [/\butsa\b/g, 'utsa'],
   [/\bla clippers\b/g, 'los angeles clippers'], [/\bla lakers\b/g, 'los angeles lakers'],
   [/\boakland athletics\b/g, 'athletics'], [/\bsacramento athletics\b/g, 'athletics'],
   [/\bmanchester utd\b/g, 'manchester united'], [/\bman utd\b/g, 'manchester united'], [/\bman city\b/g, 'manchester city'],
   [/\bpsg\b/g, 'paris saint germain'], [/\bparis sg\b/g, 'paris saint germain'], [/\binter milan\b/g, 'internazionale'],
-  [/\brc lens\b/g, 'lens'], [/\bafc ajax\b/g, 'ajax']
+  [/\brc lens\b/g, 'lens'], [/\bafc ajax\b/g, 'ajax'],
+  // (1152) Odds API vs ESPN college names: rebrands, schools ESPN lists without State, short forms
+  [/\biupui\b/g, 'iu indianapolis'], [/\biu indy\b/g, 'iu indianapolis'],
+  [/\bloyola md\b/g, 'loyola maryland'],
+  [/\bnicholls state\b/g, 'nicholls'], [/\bnicholls st\b/g, 'nicholls'],
+  [/\bcentral connecticut state\b/g, 'central connecticut'], [/\bcentral connecticut st\b/g, 'central connecticut'],
+  [/\b(?:arkansas\s+)?little rock\b/g, 'little rock'],
+  [/\bualbany\b/g, 'albany'],
+  [/\bcsu bakersfield\b/g, 'cal state bakersfield'],
+  [/\bcsu fullerton\b/g, 'cal state fullerton'],
+  [/\bcsu northridge\b/g, 'cal state northridge'],
+  [/\b(?:purdue\s+)?fort wayne\b/g, 'purdue fort wayne'],
+  [/\bseattle u\b/g, 'seattle'],
+  [/\bumkc\b/g, 'kansas city'], [/\bmissouri kansas city\b/g, 'kansas city']
 ];
-const STOP = { the: 1, of: 1, university: 1, fc: 1, cf: 1, sc: 1, ac: 1, afc: 1, club: 1 };
+const STOP = { the: 1, of: 1, university: 1, univ: 1, fc: 1, cf: 1, sc: 1, ac: 1, afc: 1, club: 1 };  // (1152) univ = university ("Boston Univ." = "Boston University")
 function norm(s) {
   let x = String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
   x = x.replace(/[’'`]/g, '').replace(/&/g, ' and ').replace(/\(([a-z]{2})\)/g, ' $1 ');
@@ -121,11 +134,17 @@ const NICK_ALIAS = [
   [/\bfighting gamecocks\b/g, 'gamecocks'],
   [/\bfighting sioux\b/g, 'sioux'],
   [/\bdiamond jaxx\b/g, 'jaxx'],
-  [/\bgolden tornadoes\b/g, 'tornadoes']
+  [/\bgolden tornadoes\b/g, 'tornadoes'],
+  [/\bantelopes\b/g, 'lopes'],   // (1152) Grand Canyon: Odds API Antelopes, ESPN Lopes
+  [/\bkangaroos\b/g, 'roos']     // (1152) Kansas City: Odds API Kangaroos, ESPN Roos
 ];
 function nickKey(s) {
   let x = ' ' + key(s) + ' ';
   NICK_ALIAS.forEach(([re, to]) => { x = x.replace(re, ' ' + to + ' '); });
+  // (1152) "St" / "St." / "State" are the same when St is not the first word.
+  // "Fresno St Bulldogs" = "Fresno State Bulldogs". Leave "St Mary's" / "St. John's" alone
+  // (St is the first word). Also leave "Mt. St. Mary's" (St after Mt/Mount) as Saint, not State.
+  x = x.replace(/(\S+)\s+st\b/g, (m, prev) => (prev === 'mt' || prev === 'mount') ? prev + ' st' : prev + ' state');
   return x.replace(/\s+/g, ' ').trim();
 }
 function teamMatch(name, team) {
