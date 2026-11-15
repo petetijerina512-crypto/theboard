@@ -209,18 +209,49 @@ function requireUser(st, event) {
 const isAdmin = u => !!(u && u.role === 'admin');
 
 // ---------- money ----------
+// (1153) Legs that drop out of combined parlay odds, to-win, settlement, and one-leg alerts.
+// Same list the client uses (app.js legDropsOut). "cancelled" here is a leg result, not a cancelled ticket.
+const ONE_LEG_DROP = { push: 1, void: 1, voided: 1, cancelled: 1, canceled: 1 };
+const ONE_LEG_KILL = { lost: 1 };
+const ONE_LEG_SETTLED = { won: 1, lost: 1, push: 1, cancelled: 1 };
+
+function legResultOf(s) {
+  return s && s.result ? String(s.result).toLowerCase() : '';
+}
+function legDropsOut(s) { return !!ONE_LEG_DROP[legResultOf(s)]; }
 const dec = o => (o > 0 ? o / 100 + 1 : 100 / Math.abs(o) + 1);
+function americanToDec(o) {
+  o = Number(o || 0);
+  return o ? dec(o) : 0;
+}
+// Decimal product of legs that still count (skips push / void / cancelled).
+function parlayDecimal(sels) {
+  let d = 1;
+  (sels || []).forEach(s => {
+    if (legDropsOut(s)) return;
+    const o = Number(s && (s.lockedOdds != null ? s.lockedOdds : s.odds) || 0);
+    if (o) d *= dec(o);
+  });
+  return Number.isFinite(d) ? d : 1;
+}
+function decimalToAmer(d) {
+  if (!d || d <= 1) return 0;
+  if (d >= 2) return Math.round((d - 1) * 100);
+  return Math.round(-100 / (d - 1));
+}
+function parlayAmerican(sels) { return decimalToAmer(parlayDecimal(sels)); }
+function parlayToWin(stake, sels) {
+  const d = parlayDecimal(sels);
+  const n = Number(stake || 0);
+  return Number.isFinite(d) && d > 1 && Number.isFinite(n) ? Math.round(n * (d - 1) * 100) / 100 : 0;
+}
 function ticketNet(bt) {
   if (!bt || (bt.status !== 'won' && bt.status !== 'lost')) return 0;
   const stake = Number(bt.stake || 0);
   if (bt.status === 'lost') return -stake;
-  let d = 1;
-  (bt.selections || []).forEach(s => {
-    if (!s || s.result === 'push') return;
-    const o = Number(s.lockedOdds != null ? s.lockedOdds : s.odds || 0);
-    if (o) d *= dec(o);
-  });
-  return stake * (d - 1);
+  // won: same drop rules as to-win / combined odds; unrounded so existing ledger sums stay as they were
+  const d = parlayDecimal(bt.selections);
+  return Number.isFinite(d) && d > 1 && Number.isFinite(stake) ? stake * (d - 1) : 0;
 }
 function computeBalances(st) {
   const balances = Object.assign({}, st.balances || {});
@@ -381,13 +412,7 @@ async function sendAlert(msg, opts) {
 }
 
 // (1151) Urgent admin alert: a parlay has exactly one leg left that still needs to win.
-const ONE_LEG_DROP = { push: 1, void: 1 };
-const ONE_LEG_KILL = { lost: 1, cancelled: 1 };
-const ONE_LEG_SETTLED = { won: 1, lost: 1, push: 1, cancelled: 1 };
-
-function legResultOf(s) {
-  return s && s.result ? String(s.result).toLowerCase() : '';
-}
+// (1153) ONE_LEG_DROP / KILL / parlayToWin live with ticketNet above so payout and the alert share them.
 
 function startMsOf(s) {
   if (!s) return null;
@@ -395,18 +420,6 @@ function startMsOf(s) {
   if (!v || !/T\d\d:/.test(String(v))) return null;
   const t = new Date(v).getTime();
   return isNaN(t) ? null : t;
-}
-
-function parlayToWin(stake, sels) {
-  let d = 1;
-  (sels || []).forEach(s => {
-    const r = legResultOf(s);
-    if (ONE_LEG_DROP[r]) return;
-    const o = Number(s && (s.lockedOdds != null ? s.lockedOdds : s.odds) || 0);
-    if (o) d *= (o > 0 ? 1 + o / 100 : 1 + 100 / Math.abs(o));
-  });
-  const n = Number(stake || 0);
-  return Number.isFinite(d) && d > 1 && Number.isFinite(n) ? Math.round(n * (d - 1) * 100) / 100 : 0;
 }
 
 function oneLegParlay(bet) {
@@ -505,7 +518,8 @@ module.exports = {
   HttpError, setTestStore, getStore, mutate, readState, readKey, normalize, migrate,
   hashPassword, verifyPassword, makeToken, readToken, requireUser, findUser, isAdmin,
   ticketNet, computeBalances, balanceOf, viewFor, publicUser, sendAlert,
-  oneLegParlay, parlayToWin, formatUrgentOneLeg, queueUrgentOneLeg, legIsLiveNow,
+  oneLegParlay, parlayToWin, parlayDecimal, parlayAmerican, decimalToAmer, americanToDec, legDropsOut, legResultOf,
+  formatUrgentOneLeg, queueUrgentOneLeg, legIsLiveNow,
   reply, fail, parseBody, clientIp, KEY, AUTH_KEY, sameKey,
   LIMIT_FIELDS, limitOverride, seedMin, globalLimits, limitsOf, openExposure
 };
