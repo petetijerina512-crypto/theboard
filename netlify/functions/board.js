@@ -240,16 +240,37 @@ function decimalToAmer(d) {
   return Math.round(-100 / (d - 1));
 }
 function parlayAmerican(sels) { return decimalToAmer(parlayDecimal(sels)); }
-function parlayToWin(stake, sels) {
+// (1155) Parlay to-win cap: after 1153 drop math, a to-win over $5,000 becomes exactly $5,000.
+// Combined American odds stay uncapped. Straight bets (one selection) are never capped.
+// Settlement caps only tickets that carry payoutCap (placed under 1155), so existing open tickets stay as stored.
+const PARLAY_MAX_TOWIN = 5000;
+function shouldCapToWin(bet, sels) {
+  if (!bet || bet === false) return false;
+  if (bet.kind === 'casino') return false;
+  const legs = sels || bet.selections || [];
+  if ((legs || []).length < 2) return false;
+  if (bet === true) return true;
+  return bet.payoutCap != null && Number(bet.payoutCap) > 0;
+}
+function parlayToWinRaw(stake, sels) {
   const d = parlayDecimal(sels);
   const n = Number(stake || 0);
-  return Number.isFinite(d) && d > 1 && Number.isFinite(n) ? Math.round(n * (d - 1) * 100) / 100 : 0;
+  return Number.isFinite(d) && d > 1 && Number.isFinite(n) ? n * (d - 1) : 0;
+}
+function parlayToWin(stake, sels, bet) {
+  const raw = parlayToWinRaw(stake, sels);
+  const rounded = Math.round(raw * 100) / 100;
+  if (!shouldCapToWin(bet, sels)) return rounded;
+  const cap = Number(bet !== true && bet && bet.payoutCap != null ? bet.payoutCap : PARLAY_MAX_TOWIN);
+  return rounded > cap ? cap : rounded;
 }
 function ticketNet(bt) {
   if (!bt || (bt.status !== 'won' && bt.status !== 'lost')) return 0;
   const stake = Number(bt.stake || 0);
   if (bt.status === 'lost') return -stake;
   // won: same drop rules as to-win / combined odds; unrounded so existing ledger sums stay as they were
+  // (1155) capped tickets use the rounded, capped parlayToWin so a hit pays exactly $5,000 when the cap applies
+  if (shouldCapToWin(bt, bt.selections)) return parlayToWin(stake, bt.selections, bt);
   const d = parlayDecimal(bt.selections);
   return Number.isFinite(d) && d > 1 && Number.isFinite(stake) ? stake * (d - 1) : 0;
 }
@@ -468,7 +489,7 @@ function formatUrgentOneLeg(userId, bet, now) {
   if (!info) return null;
   now = now || Date.now();
   const stake = Math.round(Number(bet.stake || 0) * 100) / 100;
-  const win = parlayToWin(stake, bet.selections);
+  const win = parlayToWin(stake, bet.selections, bet);
   const rem = info.pending.s;
   const start = startMsOf(rem);
   const live = legIsLiveNow(rem, now);
@@ -518,7 +539,8 @@ module.exports = {
   HttpError, setTestStore, getStore, mutate, readState, readKey, normalize, migrate,
   hashPassword, verifyPassword, makeToken, readToken, requireUser, findUser, isAdmin,
   ticketNet, computeBalances, balanceOf, viewFor, publicUser, sendAlert,
-  oneLegParlay, parlayToWin, parlayDecimal, parlayAmerican, decimalToAmer, americanToDec, legDropsOut, legResultOf,
+  oneLegParlay, parlayToWin, parlayToWinRaw, parlayDecimal, parlayAmerican, decimalToAmer, americanToDec, legDropsOut, legResultOf,
+  PARLAY_MAX_TOWIN, shouldCapToWin,
   formatUrgentOneLeg, queueUrgentOneLeg, legIsLiveNow,
   reply, fail, parseBody, clientIp, KEY, AUTH_KEY, sameKey,
   LIMIT_FIELDS, limitOverride, seedMin, globalLimits, limitsOf, openExposure

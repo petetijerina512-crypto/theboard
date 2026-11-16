@@ -317,6 +317,11 @@ function placeBet(st, me, body, ctx, ver) {
     id, time: new Date(now).toISOString(), stake, locked: true, status: 'open',
     verifiedSrc: 'server check', verifiedAt: ver.at, selections: clean, idem, rev: 1
   };
+  // (1155) new parlays carry payoutCap so settlement / alerts / display cap to-win at $5,000. Straights do not.
+  if (clean.length >= 2) {
+    ticket.payoutCap = B.PARLAY_MAX_TOWIN;
+    ticket.toWin = B.parlayToWin(stake, clean, ticket);
+  }
   st.bets[userKey].unshift(ticket);
   st.idem[userKey] = [{ k: idem, id, at: now }].concat((st.idem[userKey] || []).filter(x => now - x.at < 7 * 864e5)).slice(0, 100);
   // (1143) the alert is written here from the checked legs (feed teams, checked line and price), never the phone's text
