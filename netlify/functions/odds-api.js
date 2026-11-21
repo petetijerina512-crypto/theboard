@@ -930,6 +930,31 @@ async function runQuery(ctx, key, params, maxAge) {
 
 exports._setTestStore = _setTestStore;
 exports._mem = mem;
+
+// 1158: Durable Cache for shared odds. Browser must not keep a copy (max-age=0).
+// Price check (fresh=1) bypasses the CDN so the before-bet quote is no older than 10s.
+// Other responses are cached at the edge, but never longer than the live TTL (20s),
+// so a pregame slate that goes live is not stuck behind a 4- or 30-minute CDN entry.
+function oddsBlobTtlMs(params, json) {
+  params = params || {};
+  if (String(params.futures || '') === '1') return TTL.futures;
+  if (String(params.event || params.eventId || '').trim()) {
+    try { return eventTtl(cleanMkts(params.markets) || '', json); } catch (e) { return TTL.eventMain; }
+  }
+  if (String(params.period || '')) return TTL.period;
+  return mainTtl(json);
+}
+function applyOddsCdnHeaders(headers, params, json, fresh) {
+  if (fresh) {
+    headers['Cache-Control'] = 'private, no-store';
+    headers['Netlify-CDN-Cache-Control'] = 'private, no-store';
+    return;
+  }
+  const sec = Math.max(1, Math.min(20, Math.round((oddsBlobTtlMs(params, json) || TTL.live) / 1000)));
+  headers['Cache-Control'] = 'public, max-age=0, must-revalidate';
+  headers['Netlify-CDN-Cache-Control'] = 'public, durable, s-maxage=' + sec + ', stale-while-revalidate=' + sec;
+}
+
 exports.handler = async (event) => {
   const headers = {
     'Access-Control-Allow-Origin': '*',
@@ -949,6 +974,7 @@ exports.handler = async (event) => {
   const fresh = String(params.fresh || '') === '1';
   const res = await runQuery(ctx, key, params, fresh ? TTL.priceCheck : 0);
   if (res.src !== 'none') headers['X-Board-Cache'] = res.src;
+  applyOddsCdnHeaders(headers, params, res.json, fresh);
   try { await flushUsage(ctx); } catch (e) {}
   return { statusCode: res.status || 200, headers, body: JSON.stringify(res.json) };
 };
@@ -1504,3 +1530,10 @@ exports.fetchScores = fetchScores;
 exports.verifyLegs = verifyLegs;
 exports._verify = { orient, legKind, PROP_MARKETS, normalizeBuyAlts, altPrice, BUY_MKTS, BUY_SPORTS, BUY_MAX, BUY_CENTS, shiftJuice, buyStepCents, boughtOdds, normalizePeriod, normalizeExtras, LIVE_STALE_MS,
   EXTRA_MKTS, TT_MKTS, extraMktsFor, PERIOD_MKTS, FUTURES_KEYS, PRE_STALE_MS, normalizeProps, normalize };
+
+// 1158: espn-snapshot.js reuses the same Blob store and cached() helper.
+exports.makeCtx = makeCtx;
+exports.cached = cached;
+exports.TTL = TTL;
+exports.applyOddsCdnHeaders = applyOddsCdnHeaders;
+exports.oddsBlobTtlMs = oddsBlobTtlMs;
