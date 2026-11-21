@@ -16,6 +16,7 @@ const DEFAULT_SETTINGS = { bettingEnabled: true, minStake: 20, maxStake: 500, mi
   maxParlayFavorites: 3, minParlayStake: 20, disabledSports: [], blockedUsers: [], blockedGames: [] };
 const NEG_LIMIT = -500;           // same default the page used
 const GAME_OVER_MS = 4 * 3600e3;  // a game that started more than 4h ago is treated as over
+const LIVE_PARLAY_MSG = "Live games can't be parlayed — bet straight";
 
 const bad = msg => { throw new B.HttpError(400, msg); };
 const forbid = () => { throw new B.HttpError(403, 'Admin only.'); };
@@ -310,6 +311,11 @@ function placeBet(st, me, body, ctx, ver) {
     const t0 = startTime(x);
     x.liveAtBet = (l && l.status === 'ok' && typeof l.live === 'boolean') ? l.live : !!(t0 && now >= t0);
   });
+  // (1157) live / in-progress legs may be placed as straights, but not as part of a parlay.
+  // Uses the same liveAtBet decision (feed live flag, else server now vs start time). Existing tickets are unchanged.
+  if (clean.length >= 2 && clean.some(x => x.liveAtBet || (startTime(x) && now >= startTime(x)))) {
+    bad(LIVE_PARLAY_MSG);
+  }
   if (!st.bets[userKey]) st.bets[userKey] = [];
   let id = 'b' + now;
   while (Object.keys(st.bets).some(k => (st.bets[k] || []).some(b => b && b.id === id))) id = 'b' + (Number(id.slice(1)) + 1);
@@ -1051,6 +1057,6 @@ exports.handler = async (event) => {
     return B.reply(200, result);
   } catch (e) { return B.fail(e); }
 };
-exports._test = Object.assign(exports._test || {}, { playerResults, legTimeMs, sameTeamMlSpread, stampVerified, placeBet, SAME_TEAM_MSG, gidConflict, setLimits, settledHistory, ticketDay, chicagoMidnight, betAlert, alertLeg, patchTickets });
+exports._test = Object.assign(exports._test || {}, { playerResults, legTimeMs, sameTeamMlSpread, stampVerified, placeBet, SAME_TEAM_MSG, gidConflict, setLimits, settledHistory, ticketDay, chicagoMidnight, betAlert, alertLeg, patchTickets, LIVE_PARLAY_MSG, startTime });
 
 exports.stateView = stateView;
