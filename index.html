@@ -5,16 +5,16 @@
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
   <meta charset="UTF-8" />
-  <meta name="board-build" content="1158" />
+  <meta name="board-build" content="1159" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <title>The Board</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230d1b2a'/%3E%3Ctext x='16' y='23' font-family='Arial' font-weight='700' font-size='19' text-anchor='middle' fill='%23fff'%3EB%3C/text%3E%3C/svg%3E" />
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="preload" href="/assets/app.b746b3e6d0.js" as="script">
+  <link rel="preload" href="/assets/app.a582c8f7ad.js" as="script">
   <script>
     (window.__boardVersionCheck = function(){
-      var here = '1158';
+      var here = '1159';
       // (1133) only the first 1 KB of the page (the board-build tag near the top), not the whole 540 KB file.
       // A server that ignores Range just sends the whole page, and the ADMIN label still works then.
       fetch('/index.html?fresh=' + Date.now(), { cache: 'no-store', headers: { Range: 'bytes=0-1023' } }).then(function(r){ return r.text(); }).then(function(html){
@@ -24,7 +24,7 @@
       }).catch(function(){});
     })();   // (1136) also run again if a file can't be loaded later (a newer board went up)
     // (1136) an admin's phone also starts downloading the casino + admin files now (players never download them)
-    (function(){ try { var s = JSON.parse(localStorage.getItem('sunbook_session') || 'null'); if (s && s.role === 'admin' && localStorage.getItem('board_auth')) ['/assets/casino.343faf94a9.js', '/assets/admin.88f703f6bf.js'].forEach(function (h) { var l = document.createElement('link'); l.rel = 'preload'; l.as = 'script'; l.href = h; document.head.appendChild(l); }); } catch (e) {} })();
+    (function(){ try { var s = JSON.parse(localStorage.getItem('sunbook_session') || 'null'); if (s && s.role === 'admin' && localStorage.getItem('board_auth')) ['/assets/casino.343faf94a9.js', '/assets/admin.de47863f17.js'].forEach(function (h) { var l = document.createElement('link'); l.rel = 'preload'; l.as = 'script'; l.href = h; document.head.appendChild(l); }); } catch (e) {} })();
   </script>
   <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Oswald:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/assets/board.187478502f.css">
@@ -76,7 +76,7 @@
       <div class="id-box"><div class="label">ACCOUNT ID</div><div class="value" id="dispId">—</div></div>
       <div class="bal-box" onclick="openBalanceSheet()"><div class="label">BALANCE</div><div class="value pos" id="dispBal">$1,000.00</div></div>
 
-      <button type="button" id="adminHeaderBtn" onclick="goAdmin()" style="display:none;background:#1e3a5f;color:#fff;border:none;padding:6px 10px;border-radius:4px;font-size:0.7rem;font-weight:800;letter-spacing:0.06em;cursor:pointer;">ADMIN 1158</button>
+      <button type="button" id="adminHeaderBtn" onclick="goAdmin()" style="display:none;background:#1e3a5f;color:#fff;border:none;padding:6px 10px;border-radius:4px;font-size:0.7rem;font-weight:800;letter-spacing:0.06em;cursor:pointer;">ADMIN 1159</button>
       <div class="menu-btn" onclick="toggleMenu()">☰</div>
     </div>
 
@@ -324,7 +324,7 @@
     // changes, so a phone never mixes old and new pieces). Players download only the main file; an admin's phone
     // also gets the casino and admin files, and a player the casino is turned on for gets the casino file.
     (function () {
-      var FILES = { app: '/assets/app.b746b3e6d0.js', casino: '/assets/casino.343faf94a9.js', admin: '/assets/admin.88f703f6bf.js' };
+      var FILES = { app: '/assets/app.a582c8f7ad.js', casino: '/assets/casino.343faf94a9.js', admin: '/assets/admin.de47863f17.js' };
       var NEEDS = { admin: ['casino'] };
       var asked = {};
       function inject(name, attempt) {
