@@ -683,7 +683,8 @@ async function cached(ctx, key, ttlOf, maxAge, produce) {
   }
   // Odds API unreachable (network error): keep showing the last good odds instead of going blank,
   // like the old in-memory fallback did. Never for price checks (fresh=1): those must see the real answer.
-  if (r.thrown && !maxAge && e && e.json) return { json: e.json, status: 200, src: 'stale-error' };
+  // 1161: also reuse the last blob when the Odds API answered with an error (not only thrown timeouts). Never for price checks (maxAge / fresh=1).
+  if ((r.thrown || r.failed) && !maxAge && e && e.json) return { json: e.json, status: 200, src: 'stale-error' };
   return { json: r.json, status: r.status || 200, src: 'miss' };
 }
 
